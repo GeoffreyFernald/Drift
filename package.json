@@ -1,0 +1,21 @@
+{
+  "name": "drift-js",
+  "private": true,
+  "description": "JavaScript workspace for Drift's desktop app and design system (the CLI is Rust; see Cargo.toml)",
+  "license": "Apache-2.0",
+  "author": "Geoffrey Fernald",
+  "workspaces": [
+    "packages/ui",
+    "apps/studio"
+  ],
+  "scripts": {
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "npm run lint --workspaces",
+    "test": "npm run test --workspaces"
+  },
+  "//": "overrides.minimatch: eslint 10 and typescript-eslint 8 pull minimatch 10.2.x, affected by GHSA-g3hv-75wg-m249 (ReDoS); 11.0.4 is the fixed release with the same API.",
+  "overrides": {
+    "minimatch": "11.0.4"
+  },
+  "type": "module"
+}
