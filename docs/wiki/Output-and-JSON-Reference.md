@@ -244,11 +244,11 @@ The open questions, in the order they are asked. Schema `drift-setup-questions`,
 | `config` | The file answers are written to: `.drift/config.yaml`. |
 | `questions` | The questions; below. |
 | `answered` | Questions answered on the evidence they show now (listed only with `--all`). |
-| `waiting` | An agent's answers waiting for a person. |
+| `waiting` | An agent's answers waiting for a person (beside a person's answer whose evidence changed). |
 
 A question: `id` (`S-` and four hex digits), `kind` (`deployment`, `terraform`, `check`), `status` (`open`, `answered`, `changed`, `proposed`, `rejected`), `answered` and `answered_by` (optional), `proposal` and `rejected` (optional: an agent's answer with `answer`, `label`, `by`, `reason`, `evidence`, `on`, `stale`), `text` (paragraphs), `note` (optional), `question`, `choices`, `default` (`skip`), `command` (`drift setup --answer <id>=<answer>`), `evidence` (a digest), `how_to_decide`, and `context` (optional: `facts`, `excerpts` of `{what, file, line, text}`, `routes`, `omitted`).
 
-A choice: `answer` (what `--answer <id>=` takes), `label`, `effect` (what it does, counted where it moves routes), `writes` and `writes_under` (the line it writes and the key it goes under, optional), `moves` (routes it moves), and `needs_person`: given by an agent, this answer is a proposal until a person confirms it, because it could make a route reachable only from inside, or a check counted.
+A choice: `answer` (what `--answer <id>=` takes), `label`, `effect` (what it does, counted where it moves routes), `writes` and `writes_under` (the line it writes and the key it goes under, optional), `moves` (routes it moves), and `needs_person`: this answer would make a fact (it could make a route reachable only from inside, or a check counted), so a person's is typed on the terminal; an agent's takes effect at once all the same.
 
 ## `drift investigate --json`
 
@@ -260,7 +260,7 @@ Every route Drift could not settle, grouped by what would settle it. Schema `dri
 | `config` | Where outcomes and proposals are recorded: `.drift/config.yaml`. |
 | `items` | The items; below. An agent's proposals waiting for a person first, then by the routes they would settle; with `--all`, every one. |
 | `open` | Items with nothing recorded, or recorded on evidence that changed. |
-| `waiting` | An agent's proposals waiting for a person. |
+| `waiting` | An agent's proposals waiting for a person (beside a person's record whose evidence changed). |
 | `skipped` | Items an agent skipped with a note. |
 | `settled` | Items settled: an outcome recorded on the evidence they show now, a finding or gap report written, or their setup question answered. |
 | `routes` | Distinct routes the listed items would settle. |

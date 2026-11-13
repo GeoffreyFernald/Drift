@@ -145,13 +145,6 @@ pub struct Boundaries {
     /// it is read from its code ([`Boundaries::set_relays`]).
     #[serde(skip)]
     callers: Vec<Caller>,
-    /// The compose files left out on an agent's word alone
-    /// ([`crate::policy::SecuritySettings::on_agents_word`]), with the boundary as it
-    /// is without them: a route they would make reachable only from inside reads
-    /// unknown ([`inventory_with`]). Serialised where there is one, so what is kept
-    /// of an inventory changes with it; [`inventory_with`] takes it out.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cautious: Option<(Vec<String>, Box<Boundaries>)>,
     /// The symbols a person declared in `.drift/config.yaml` `practices:`, which the
     /// inventory reads as the practice map does ([`crate::policy::DriftConfig::practices`]).
     #[serde(skip)]
@@ -673,20 +666,6 @@ impl Boundaries {
     /// boundary would be with other answers (`drift setup` counts what each would
     /// move).
     pub fn load_with(root: &Path, config: anyhow::Result<crate::policy::DriftConfig>) -> Self {
-        // An agent's word may only make Drift more cautious, however the repository
-        // changed since it was given: the boundary without what it left out is kept
-        // beside, and decides every route that would otherwise read as inside.
-        if let Ok(cfg) = &config
-            && !cfg.security.on_agents_word.is_empty()
-        {
-            let mut all = cfg.clone();
-            let agents = std::mem::take(&mut all.security.on_agents_word);
-            let mut person = all.clone();
-            person.security.not_deployed.retain(|p| !agents.contains(p));
-            let mut b = Self::load_with(root, Ok(all));
-            b.cautious = Some((agents, Box::new(Self::load_with(root, Ok(person)))));
-            return b;
-        }
         let mut b = Self::default();
         let not_deployed: Vec<String> = config
             .as_ref()
@@ -6747,7 +6726,6 @@ pub fn inventory(repo: &RepoFacts) -> Inventory {
 /// The inventory, with each entry point's exposure from `boundaries`.
 pub fn inventory_with(repo: &RepoFacts, boundaries: Boundaries) -> Inventory {
     let mut boundaries = boundaries;
-    let cautious = boundaries.cautious.take();
     let declared = std::mem::take(&mut boundaries.declared);
     let declared_by = std::mem::take(&mut boundaries.declared_by);
     // Every entry point Drift lists, the ones mining does not read yet included
@@ -6940,35 +6918,6 @@ pub fn inventory_with(repo: &RepoFacts, boundaries: Boundaries) -> Inventory {
     // One row per entry point: a symbol two sources declare the same way (a console
     // script naming an argparse `main`) is one entry point, not two.
     inv.entry_points.dedup();
-    if let Some((files, person)) = cautious {
-        // What an agent left out may not make a route reachable only from inside:
-        // where the boundary without it does not say so, the route is unknown.
-        let without = inventory_with(repo, *person);
-        let key = |e: &EntryRow| {
-            (
-                e.path.clone(),
-                e.symbol.clone(),
-                e.line,
-                e.method.clone(),
-                e.route.clone(),
-            )
-        };
-        let then: BTreeMap<_, Exposure> = without
-            .entry_points
-            .iter()
-            .map(|e| (key(e), e.exposure))
-            .collect();
-        let files: Vec<String> = files.iter().map(|f| format!("`{f}`")).collect();
-        for e in &mut inv.entry_points {
-            if e.exposure == Exposure::Internal && then.get(&key(e)) != Some(&Exposure::Internal) {
-                e.exposure = Exposure::Unknown;
-                e.boundary = Some(format!(
-                    "reachable only from inside only if {} deploys nothing, which an agent answered and no person confirmed (drift setup)",
-                    files.join(" and ")
-                ));
-            }
-        }
-    }
     inv.guard_gaps = guard_gaps(&inv.entry_points);
     inv.sinks.sort();
     inv.client_leaks = leaks

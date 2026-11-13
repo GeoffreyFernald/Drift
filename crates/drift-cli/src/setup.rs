@@ -158,19 +158,19 @@ pub enum Status {
     Answered,
     /// Answered, and the evidence changed since: asked again.
     Changed,
-    /// An agent's answer waits for a person (`drift setup --review`): until then it
-    /// changes nothing.
+    /// An agent's answer to a question a person answered on evidence that changed
+    /// since waits for a person (`drift setup --review`): until then it changes nothing.
     Proposed,
     /// A person rejected an agent's answer on the evidence it shows now: not asked
     /// again until that changes.
     Rejected,
 }
 
-/// Who gives an answer. A person's answer is taken as given. An agent's answer takes
-/// effect at once only where it can make Drift more cautious and never less (it writes
-/// nothing, or it leaves a compose file out and no route becomes reachable only from
-/// inside); any other is a proposal ([`Choice::needs_person`]) that changes nothing until
-/// a person confirms it.
+/// Who gives an answer. A person's answer is taken as given; one that would make a fact
+/// ([`Choice::needs_person`]) is typed on the terminal. An agent's answer takes effect at
+/// once and is recorded with its reason, except where a person answered the question:
+/// on the evidence the person answered on it is refused, and once that changed it is a
+/// proposal that changes nothing until a person confirms it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum By {
@@ -209,8 +209,8 @@ impl Given {
     }
 }
 
-/// An agent's answer waiting for a person, or one a person rejected, as a question
-/// shows it.
+/// An agent's answer waiting for a person (beside a person's answer whose evidence
+/// changed), or one a person rejected, as a question shows it.
 #[derive(Debug, Clone, Serialize)]
 pub struct Proposal {
     pub answer: String,
@@ -245,9 +245,9 @@ pub struct Choice {
     pub writes_under: Option<String>,
     /// How many routes it moves (0 where it moves none or it was not counted).
     pub moves: usize,
-    /// Given by an agent, this answer is a proposal that changes nothing until a person
-    /// confirms it: it could make a route reachable only from inside, or a check
-    /// counted. Every other answer can only make Drift more cautious and takes effect.
+    /// This answer would make a fact: it could make a route reachable only from inside,
+    /// or a check counted. Given by a person, it is typed on the terminal; every other
+    /// answer can only make Drift more cautious. An agent's answer takes effect either way.
     pub needs_person: bool,
     #[serde(skip)]
     write: Vec<Write>,
@@ -444,9 +444,7 @@ impl Write {
     }
 }
 
-/// Settings as YAML Drift reads back the same: what the counts are made from. A
-/// compose file left out on an agent's word alone stays so
-/// ([`drift_mine::policy::agents_word`]): written as `drift setup` writes it.
+/// Settings as YAML Drift reads back the same: what the counts are made from.
 fn config_text(cfg: &DriftConfig) -> String {
     let j = |v: Value| serde_json::to_string(&v).unwrap_or_default();
     let sec = &cfg.security;
@@ -470,27 +468,12 @@ fn config_text(cfg: &DriftConfig) -> String {
         j(json!(ties))
     );
     for p in &sec.not_deployed {
-        if sec.on_agents_word.contains(p) {
-            out.push_str(&format!(
-                "    # drift setup {} (counted)\n",
-                id_of("deployment", p)
-            ));
-        }
         out.push_str(&format!("    - {}\n", quoted(p)));
     }
     if sec.not_deployed.is_empty() {
         out = out.replace("  not_deployed:\n", "  not_deployed: []\n");
     }
     out.push_str(&format!("practices: {}\n", j(json!(cfg.practices))));
-    if !sec.on_agents_word.is_empty() {
-        out.push_str("setup:\n");
-        for p in &sec.on_agents_word {
-            out.push_str(&format!(
-                "  {}: {{answer: \"tests-only\", by: \"agent\"}}\n",
-                id_of("deployment", p)
-            ));
-        }
-    }
     out
 }
 
@@ -930,10 +913,7 @@ impl<'a> Setup<'a> {
     fn inventory(&self, text: &str) -> Rc<Inventory> {
         // What the boundary reads of the config: `security:` alone.
         let key = DriftConfig::parse(text, CONFIG_FILE)
-            .map(|c| {
-                serde_json::to_string(&(&c.security, &c.security.on_agents_word))
-                    .unwrap_or_default()
-            })
+            .map(|c| serde_json::to_string(&c.security).unwrap_or_default())
             .unwrap_or_else(|_| text.to_string());
         if let Some(i) = self.inventories.borrow().get(&key) {
             return i.clone();
@@ -1008,14 +988,7 @@ impl<'a> Setup<'a> {
             if let Some(r) = records.get(&q.id) {
                 q.answered = Some(r.answer.clone());
                 q.answered_by = Some(r.by);
-                // An agent's answer is judged again on the repository as it is now:
-                // one that would now make a fact is asked again (and what it wrote
-                // only ever makes Drift more cautious: the routes read unknown).
-                let now_a_fact = !r.by_person()
-                    && q.choices
-                        .iter()
-                        .any(|c| c.answer == r.answer && c.needs_person);
-                q.status = if r.seen == q.evidence && !now_a_fact {
+                q.status = if r.seen == q.evidence {
                     Status::Answered
                 } else {
                     Status::Changed
@@ -1808,9 +1781,9 @@ impl<'a> Setup<'a> {
     }
 
     /// Answer `id` with `answer`, given as `given` says: write what it writes
-    /// (replacing an earlier answer) and record it, or, for an agent's answer that
-    /// would make a fact ([`Choice::needs_person`]) or that would replace a person's,
-    /// record it as a proposal that writes nothing else. Returns the line that says
+    /// (replacing an earlier answer) and record it, or, for an agent's answer to a
+    /// question a person answered on evidence that changed since, record it as a
+    /// proposal that writes nothing else. Returns the line that says
     /// what changed. `skip` writes nothing. The config is read again first: an edit
     /// made since it was read is what the answer goes into.
     pub fn answer(&mut self, id: &str, answer: &str, given: &Given) -> anyhow::Result<String> {
@@ -1852,9 +1825,6 @@ impl<'a> Setup<'a> {
                         r.answer
                     );
                 }
-                return self.propose(&q, choice, given);
-            }
-            if choice.needs_person {
                 return self.propose(&q, choice, given);
             }
         } else if choice.needs_person {
@@ -2095,9 +2065,8 @@ impl<'a> Setup<'a> {
     /// Take out what the answer to `id` wrote, an agent's proposal for it, and a
     /// rejection of one: exactly the lines drift setup wrote for it ([`Self::taken_out`]).
     /// `by` an agent, only what an agent alone said (its answer no person confirmed,
-    /// its proposal), and only where taking it out makes no route reachable only from
-    /// inside: an agent never takes out what a person said ([`Self::persons_record`], a
-    /// rejection), nor makes a fact by forgetting. The same for an investigate item.
+    /// its proposal): an agent never takes out what a person said
+    /// ([`Self::persons_record`], a rejection). The same for an investigate item.
     pub fn forget(&mut self, id: &str, by: By) -> anyhow::Result<()> {
         self.refresh()?;
         let record = records(&self.text).remove(id);
@@ -2134,18 +2103,6 @@ impl<'a> Setup<'a> {
             );
         }
         let text = self.taken_out(id, Part::All, false).map_err(unsafe_edit)?;
-        let m = moves(&self.inventory(&self.text), &self.inventory(&text));
-        let inside: usize =
-            m.by.iter()
-                .filter(|((_, to), _)| *to == Exposure::Internal)
-                .flat_map(|(_, p)| p.values())
-                .sum();
-        if inside > 0 {
-            bail!(
-                "taking out {id} would make {inside} route{} reachable only from inside: a person does that (`drift setup --forget {id}` in a terminal)",
-                if inside == 1 { "" } else { "s" }
-            );
-        }
         self.save(text)
     }
 
@@ -2905,10 +2862,11 @@ Drift says "unknown" where it cannot prove an answer. `drift setup` asks the few
 
 ## The rule you answer under
 
-Every answer is something Drift cannot prove, and you can be wrong in the same ways Drift would be. So:
+Every answer is something Drift cannot prove, and you can be wrong in the same ways Drift would be. So answer only what the evidence supports, and:
 
-- An answer that can only make Drift more cautious takes effect at once: "it deploys", "only for tests" where no route becomes reachable only from inside, "Terraform does not deploy this service", "yes, some of them can be reached", "no, it is not a check", and "skip".
-- Any other answer is a proposal: a Terraform tie, "nothing outside reaches these services", "yes, this is our tenant / owner / role check", a test stack whose leaving out would make routes reachable only from inside. It is written under `setup.proposed` in `.drift/config.yaml` with your reason, and changes nothing until a person confirms it. Each choice says which it is: `needs_person: true` is a proposal.
+- Your answer takes effect at once. It is written to `.drift/config.yaml` with your reason and the files you cite, so a person sees whose word it rests on and can take it out (`drift setup --forget <id>`).
+- A person's answer is never replaced by yours. On the evidence the person answered on, your answer is refused. Once that evidence changed, your answer is a proposal: it is written under `setup.proposed` with your reason and changes nothing until a person confirms it (`drift setup --review`).
+- An answer a person rejected is not taken again on the same evidence.
 - Never pass `--by person`: your answers are an agent's.
 
 ## How
@@ -2919,7 +2877,7 @@ Every answer is something Drift cannot prove, and you can be wrong in the same w
    `drift setup --answer S-1a2b=tests-only --reason "<what you read and what it shows>" --evidence path/to/file:12 --evidence other/file:3`
    Through MCP: `drift_setup_answer` with `id`, `answer`, `reason` and `evidence`.
    Several at once, in one run (each answer otherwise reads the whole repository again): `drift setup --answers answers.json`, a list of `{"id": "S-1a2b", "answer": "tests-only", "reason": "...", "evidence": ["path/to/file:12"]}`.
-4. When you are done, tell the person how many of your answers wait for them (`waiting` in `drift setup --json`; `drift setup --list` shows them first), and that `drift setup --review` shows each with your reason so they can confirm or reject it.
+4. When you are done, tell the person what you answered and why (`drift setup --json --all` lists each answer with `answered_by`), and, if any of your answers wait for them (`waiting` in `drift setup --json`; `drift setup --list` shows them first), that `drift setup --review` shows each with your reason so they can confirm or reject it.
 "#;
 
 /// `drift init`'s line, when there is a question open.

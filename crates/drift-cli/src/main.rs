@@ -214,8 +214,8 @@ enum Command {
         interactive: bool,
         /// Who answers: `person` (the default when standard input is a terminal, unless
         /// CLAUDECODE is set or DRIFT_AGENT=1: an agent's environment) or `agent` (the
-        /// default otherwise). An agent's answer takes effect only where it can make
-        /// Drift more cautious; any other waits for a person (`--review`). Without a
+        /// default otherwise). An agent's answer takes effect at once; beside a person's
+        /// answer whose evidence changed, it waits for a person (`--review`). Without a
         /// terminal, `person` writes only with DRIFT_SETUP_PERSON=1, set by the person
         /// who runs the script. A person's answer that makes a fact asks them to type
         /// its id on the terminal (/dev/tty), unless DRIFT_SETUP_PERSON_NONINTERACTIVE=1
@@ -253,7 +253,8 @@ enum Command {
     /// Every route Drift could not settle (authentication or authorization unknown or
     /// none, reach unknown or inside only), grouped by what would settle it, with the
     /// evidence to read; and the outcomes an agent or a person records for each. An
-    /// outcome that would make a fact waits for a person (`drift setup --review`).
+    /// agent's outcome takes effect at once; beside a person's record whose evidence
+    /// changed, it waits for a person (`drift setup --review`).
     #[command(after_help = INVESTIGATE_HELP)]
     Investigate {
         /// Print the open items, each with the command that records an outcome, and
@@ -635,8 +636,8 @@ const SETUP_HELP: &str = "Examples:
   drift setup --forget S-1a2b          take out what that answer wrote
   drift setup --all                    ask the answered questions again too
   drift setup --answer S-1a2b=tie-1 --by agent --reason \"...\" --evidence infra/main.tf:12
-                                       an agent's answer: it takes effect only where it makes
-                                       Drift more cautious; any other waits for a person
+                                       an agent's answer: it takes effect at once; beside a
+                                       person's answer on changed evidence, it waits for one
   drift setup --review                 for a person: confirm or reject what an agent answered
   drift setup --confirm S-1a2b         (or --reject S-1a2b) the same for one, its id typed again
   drift setup --answers answers.json   several in one run: a JSON list of id, answer, reason, evidence
@@ -659,7 +660,7 @@ const INVESTIGATE_HELP: &str = "Examples:
   drift investigate --json --evidence --item I-1a2b3c
                                        one item's evidence
   drift investigate --record I-1a2b3c=not-a-check --reason \"...\" --evidence app/svc.py:40
-                                       an outcome; one that would make a fact waits for a person
+                                       an outcome: an agent's takes effect at once
   drift investigate --record I-1a2b3c=finding --title \"...\" --reason \"...\" --fix \"...\" --evidence app/svc.py:40
                                        a real gap: a local finding (drift findings), never posted
   drift investigate --answers outcomes.json
@@ -772,8 +773,8 @@ Other clients: {\"mcpServers\": {\"drift\": {\"command\": \"drift\", \"args\": [
 Tools that only read: drift_rules_for, drift_example, drift_check, drift_explain, drift_map,
 drift_card, drift_security, drift_practices, drift_setup_questions, drift_investigate_items.
 Tools that write: drift_setup_answer (an agent's answer to a setup question, in
-.drift/config.yaml; only one that makes Drift more cautious takes effect, any other
-waits for a person), drift_investigate_record (an agent's outcome for an open route,
+.drift/config.yaml; it takes effect at once, except beside a person's answer whose
+evidence changed, where it waits for a person), drift_investigate_record (an agent's outcome for an open route,
 under the same rule, and its local findings and gap reports under .drift/), and with
 `agents.verify: on` drift_verify_card (verdicts, in .drift/verify-cache.json).
 `drift export claude-settings` pre-approves the tools that only read.";

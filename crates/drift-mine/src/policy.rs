@@ -193,7 +193,6 @@ impl DriftConfig {
                 ));
             }
         }
-        out.security.on_agents_word = agents_word(text, &v, &out.security.not_deployed);
         out.declared_by = declared_by(&v, &out.practices);
         Ok(out)
     }
@@ -311,13 +310,6 @@ pub struct SecuritySettings {
     /// What a person says of the repository's Terraform ([`TerraformTie`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub terraform: Vec<TerraformTie>,
-    /// The entries of `not_deployed` that rest only on an agent's answer to `drift
-    /// setup` that no person confirmed ([`agents_word`]): they count only where they
-    /// make Drift more cautious, judged each time the boundary is read
-    /// ([`crate::security::Boundaries::load_with`]). Not a setting: read from what
-    /// `drift setup` wrote.
-    #[serde(skip)]
-    pub on_agents_word: Vec<String>,
 }
 
 /// Whose word each symbol declared under `practices:` rests on, from what `drift setup`
@@ -358,44 +350,6 @@ pub fn declared_by(
 pub fn setup_id(kind: &str, subject: &str) -> String {
     let h = blake3::hash(format!("{kind}\0{subject}").as_bytes());
     format!("S-{}", &h.to_hex()[..4])
-}
-
-/// The entries of `security.not_deployed` in the config `text` that rest only on an
-/// agent's answer no person confirmed: the line is the one `drift setup` wrote for
-/// the agent's "only for tests" (`# drift setup <id> ...` above `- "<file>"`), the
-/// record under `setup:` says `by: agent` and no `confirmed_by: person`, and nothing
-/// else in the list names the same entry.
-pub fn agents_word(text: &str, v: &serde_json::Value, not_deployed: &[String]) -> Vec<String> {
-    let Some(setup) = v.get("setup").and_then(|s| s.as_object()) else {
-        return Vec::new();
-    };
-    let lines: Vec<&str> = text.lines().collect();
-    let written = |id: &str, p: &str| {
-        let line = format!("- {}", serde_json::to_string(p).unwrap_or_default());
-        lines.windows(2).any(|w| {
-            w[0].trim_start()
-                .starts_with(&format!("# drift setup {id} "))
-                && w[1].trim() == line
-        })
-    };
-    let mut out: Vec<String> = Vec::new();
-    for p in not_deployed {
-        let id = setup_id("deployment", p);
-        let Some(r) = setup.get(&id) else {
-            continue;
-        };
-        let s = |k: &str| r.get(k).and_then(|x| x.as_str()).unwrap_or_default();
-        if s("by") == "agent"
-            && s("confirmed_by") != "person"
-            && s("answer") == "tests-only"
-            && not_deployed.iter().filter(|x| *x == p).count() == 1
-            && written(&id, p)
-            && !out.contains(p)
-        {
-            out.push(p.clone());
-        }
-    }
-    out
 }
 
 /// One entry of `security.terraform`: `{target: <module dir>[#aws_lb_target_group.<name>],

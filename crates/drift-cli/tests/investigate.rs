@@ -7,9 +7,10 @@
 //! anyone may call).
 //!
 //! Each outcome is checked against what `drift security`, `drift practices`, a card, the
-//! census and the session hook say before and after: a proposal changes none of them
-//! until a person confirms it, a cautious outcome takes effect, and findings and gap
-//! reports are local files git does not see.
+//! census and the session hook say before and after: an agent's outcome takes effect at
+//! once, one beside a person's record whose evidence changed is a proposal that changes
+//! none of them until a person confirms it, and findings and gap reports are local files
+//! git does not see.
 
 use std::io::Write as _;
 use std::path::Path;
@@ -320,6 +321,27 @@ fn record(root: &Path, id_outcome: &str, reason: &str, cited: &str) -> String {
     )
 }
 
+/// A person's own record for `id_outcome` (as a person's script records it), then a
+/// comment line put above `file`: the lines Drift read move, so the evidence the person
+/// recorded it on changed, and an agent's outcome for it now waits for a person.
+fn stale_persons_record(root: &Path, id_outcome: &str, file: &str) {
+    drift(
+        root,
+        &[
+            "investigate",
+            "--by",
+            "person",
+            "--record",
+            id_outcome,
+            "--reason",
+            "a person's note",
+        ],
+    );
+    let p = root.join(file);
+    let body = std::fs::read_to_string(&p).unwrap();
+    std::fs::write(&p, format!("# moved\n{body}")).unwrap();
+}
+
 // ---------- the open list ----------
 
 /// Every route Drift could not settle is in one item, grouped by what would settle it,
@@ -470,21 +492,89 @@ fn the_open_list_groups_routes_by_what_would_settle_them() {
 
 // ---------- the trust rule ----------
 
-/// A guard named by an agent is a proposal: nothing Drift says changes (security,
-/// practices, the card, the census, the session hook) until a person confirms it; then
-/// it is exactly a person's answer. An agent cannot confirm; a rejection is remembered.
+/// A guard named by an agent takes effect at once: the routes are known on its word,
+/// recorded as an agent's with its reason, exactly as a person's answer would make
+/// them, and no proposal waits.
 #[test]
-fn a_proposal_changes_nothing_until_a_person_confirms_it() {
+fn an_agents_guard_takes_effect_at_once() {
     let dir = repo();
     let r = dir.path();
     let guard = id(&item(r, "unread", "authn"));
-    let before = everything(r);
+    assert_eq!(unit(r, "authn", "weekly").0, "unknown");
     let outcome = format!("{guard}=guard:pkg:vendor_auth#require_member");
     let said = record(
         r,
         &outcome,
         "vendor_auth.require_member answers 401 without a session",
         "svc/app/api/reports.py:3",
+    );
+    assert!(
+        said.starts_with(&format!(
+            "{guard}: 1 route goes from unknown to known (on your word)."
+        )),
+        "{said}"
+    );
+    assert!(!said.contains("waiting for a person"), "{said}");
+    assert_eq!(unit(r, "authn", "weekly").0, "known");
+    let cfg = config(r).unwrap();
+    assert!(
+        cfg.contains("practices:\n  authn:\n    # drift setup ")
+            && cfg.contains(
+                "; answered by an agent because vendor_auth.require_member answers 401 without a session\n"
+            )
+            && cfg.contains("\"pkg:vendor_auth#require_member\": \"require_member\"")
+            && cfg.contains("by: \"agent\""),
+        "{cfg}"
+    );
+    assert!(!cfg.contains("proposed:"), "{cfg}");
+    assert!(!cfg.contains("confirmed_by"), "{cfg}");
+    // Settled: the route is known, so the item is gone from the list, and nothing waits.
+    let l = listing(r, &["--all"]);
+    assert_eq!(l["waiting"], 0);
+    assert!(
+        !l["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["id"] == guard.as_str()),
+        "{l:#}"
+    );
+    // As a person's own answer, but for whose word it rests on.
+    let person = repo();
+    let p = person.path();
+    drift(p, &["investigate", "--by", "person", "--record", &outcome]);
+    assert_eq!(
+        drift(r, &["practices", "--json", "--units"]),
+        drift(p, &["practices", "--json", "--units"])
+    );
+    let agents = drift(r, &["security", "--json"]);
+    assert!(
+        agents.contains("an agent, not confirmed by a person"),
+        "{agents}"
+    );
+    assert_eq!(
+        agents.replace("an agent, not confirmed by a person", "a person"),
+        drift(p, &["security", "--json"])
+    );
+}
+
+/// Beside a person's record whose evidence changed, a guard named by an agent is a
+/// proposal: nothing Drift says changes (security, practices, the card, the census, the
+/// session hook) until a person confirms it; then it is exactly a person's answer. An
+/// agent cannot confirm; a rejection is remembered until the evidence changes again.
+#[test]
+fn beside_a_persons_stale_record_an_agents_guard_waits_for_a_person() {
+    let dir = repo();
+    let r = dir.path();
+    let guard = id(&item(r, "unread", "authn"));
+    stale_persons_record(r, &format!("{guard}=not-a-guard"), "svc/app/api/reports.py");
+    let before = everything(r);
+    let outcome = format!("{guard}=guard:pkg:vendor_auth#require_member");
+    let said = record(
+        r,
+        &outcome,
+        "vendor_auth.require_member answers 401 without a session",
+        "svc/app/api/reports.py:4",
     );
     assert!(
         said.starts_with(&format!("{guard}: proposed, waiting for a person")),
@@ -496,10 +586,7 @@ fn a_proposal_changes_nothing_until_a_person_confirms_it() {
     );
     assert_eq!(everything(r), before);
     let cfg = config(r).unwrap();
-    assert!(
-        cfg.starts_with("setup:\n  proposed:\n    # drift setup "),
-        "{cfg}"
-    );
+    assert!(cfg.contains("\n  proposed:\n    # drift setup "), "{cfg}");
     assert!(!cfg.contains("practices:"), "{cfg}");
     let l = listing(r, &[]);
     assert_eq!(l["waiting"], 1);
@@ -528,13 +615,14 @@ fn a_proposal_changes_nothing_until_a_person_confirms_it() {
             "--reason",
             "again",
             "--evidence",
-            "svc/app/api/reports.py:3",
+            "svc/app/api/reports.py:4",
         ],
     );
     assert!(err.contains("a person rejected"), "{err}");
-    // Proposed again after the rejection is forgotten, and confirmed.
-    drift(r, &["setup", "--by", "person", "--forget", &guard]);
-    record(r, &outcome, "it answers 401", "svc/app/api/reports.py:3");
+    // The code moves again: proposed again, and confirmed.
+    let reports = std::fs::read_to_string(r.join("svc/app/api/reports.py")).unwrap();
+    write(r, "svc/app/api/reports.py", &format!("# again\n{reports}"));
+    record(r, &outcome, "it answers 401", "svc/app/api/reports.py:5");
     let said = drift(r, &["setup", "--by", "person", "--confirm", &guard]);
     assert!(said.starts_with(&format!("{guard}: confirmed: ")), "{said}");
     assert_eq!(unit(r, "authn", "weekly").0, "known");
@@ -547,9 +635,15 @@ fn a_proposal_changes_nothing_until_a_person_confirms_it() {
         "{cfg}"
     );
     assert!(cfg.contains("confirmed_by: \"person\""), "{cfg}");
-    // As a person's own answer.
+    assert!(!cfg.contains("not-a-guard"), "{cfg}");
+    // As a person's own answer on the same code.
     let person = repo();
     let p = person.path();
+    write(
+        p,
+        "svc/app/api/reports.py",
+        &format!("# again\n# moved\n{REPORTS}"),
+    );
     drift(p, &["investigate", "--by", "person", "--record", &outcome]);
     assert_eq!(
         drift(r, &["practices", "--json", "--units"]),
@@ -561,34 +655,44 @@ fn a_proposal_changes_nothing_until_a_person_confirms_it() {
     );
 }
 
-/// "Nothing outside reaches these routes" by an agent is a proposal; confirmed, the
-/// routes are reachable only from inside. A check named by an agent is a proposal too.
+/// "Nothing outside reaches these routes" by an agent takes effect at once: the routes
+/// are reachable only from inside. A check named by an agent takes effect too, and says
+/// where it reaches no route.
 #[test]
-fn internal_and_a_check_are_proposals() {
+fn internal_and_a_check_take_effect_at_once() {
     let dir = repo();
     let r = dir.path();
     let reach = id(&item(r, "exposure", "exposure"));
     let unread = id(&item(r, "unread", "authz"));
-    let before = everything(r);
-    record(
+    let said = record(
         r,
         &format!("{reach}=internal"),
         "no load balancer leads to svc",
         "svc/app/main.py:9",
     );
+    assert!(!said.contains("waiting for a person"), "{said}");
+    let inside = exposures(r);
+    assert!(inside.iter().all(|(_, e)| e == "internal"), "{inside:?}");
+    assert!(config(r).unwrap().contains("security:\n  internal:\n"));
     let said = record(
         r,
         &format!("{unread}=check:tenant:svc/app/services.py#RuleBook._ensure_access"),
         "it compares the rule's tenant with the caller's",
         "svc/app/services.py:9",
     );
-    assert!(said.contains("proposed, waiting for a person"), "{said}");
+    assert!(!said.contains("waiting for a person"), "{said}");
     // It does not reach these routes: said, so a person is not misled.
     assert!(
         said.contains("no route of this item goes from unknown to known"),
         "{said}"
     );
-    assert_eq!(everything(r), before);
+    assert!(
+        config(r)
+            .unwrap()
+            .contains("\"svc/app/services.py#RuleBook._ensure_access\""),
+        "{:?}",
+        config(r)
+    );
     // A symbol that names nothing is refused.
     let err = drift_fails(
         r,
@@ -603,27 +707,13 @@ fn internal_and_a_check_are_proposals() {
     assert!(err.contains("which is nowhere in the repository"), "{err}");
     let out = drift_in(r, &["setup", "--by", "person", "--review"], "");
     assert!(
-        out.contains("2 answers an agent gave wait for you."),
+        out.contains("No answer from an agent waits for you."),
         "{out}"
     );
-    drift(
-        r,
-        &[
-            "setup",
-            "--by",
-            "person",
-            "--confirm",
-            &reach,
-            "--reject",
-            &unread,
-        ],
-    );
-    let inside = exposures(r);
-    assert!(inside.iter().all(|(_, e)| e == "internal"), "{inside:?}");
-    assert!(config(r).unwrap().contains("security:\n  internal:\n"));
+    assert_eq!(listing(r, &[])["waiting"], 0);
 }
 
-/// Confirming "nothing outside reaches these routes" writes what holds exactly the item's
+/// "Nothing outside reaches these routes" writes what holds exactly the item's
 /// routes: the narrowest directory holding them and nothing else, else their files, and
 /// never `""`. A package or a file added later elsewhere is not made internal by it, and
 /// forgetting the answer takes out what it wrote.
@@ -649,13 +739,12 @@ fn internal_covers_only_the_items_routes() {
             write(r, f, ROUTES);
         }
         let reach = id(&item(r, "exposure", "exposure"));
-        record(
+        let said = record(
             r,
             &format!("{reach}=internal"),
             "behind the gateway",
             &format!("{}:1", files[0]),
         );
-        let said = drift(r, &["setup", "--by", "person", "--confirm", &reach]);
         let cfg = config(r).unwrap();
         let inside: Vec<&str> = cfg
             .split("  internal:\n")
@@ -690,6 +779,7 @@ fn internal_covers_only_the_items_routes() {
 /// person's outcome that makes a fact ask for the id on `/dev/tty`, never standard input.
 /// `DRIFT_SETUP_PERSON=1` alone, with no terminal, is refused even with the id piped in;
 /// with `DRIFT_SETUP_PERSON_NONINTERACTIVE=1` too, a person's script is taken at its word.
+/// The agent's outcome waits beside a person's skip note whose evidence changed.
 #[cfg(unix)]
 #[test]
 fn a_persons_word_is_typed_on_the_terminal() {
@@ -697,12 +787,14 @@ fn a_persons_word_is_typed_on_the_terminal() {
     let dir = repo();
     let r = dir.path();
     let reach = id(&item(r, "exposure", "exposure"));
-    record(
+    stale_persons_record(r, &format!("{reach}=skip"), "svc/app/api/tokens.py");
+    let said = record(
         r,
         &format!("{reach}=internal"),
         "no load balancer leads to svc",
         "svc/app/main.py:9",
     );
+    assert!(said.contains("proposed, waiting for a person"), "{said}");
     let waiting = config(r).unwrap();
     // No controlling terminal at all: a new session.
     let detached = |args: &[&str], stdin: &str| {
@@ -756,7 +848,8 @@ fn a_persons_word_is_typed_on_the_terminal() {
 
 /// Without `--by`, an agent's environment makes the run an agent's on a terminal too
 /// (`CLAUDECODE` set, or `DRIFT_AGENT=1`); a person at a terminal types the id, and a
-/// wrong one changes nothing. The terminal is a pseudo-terminal `script` opens.
+/// wrong one changes nothing. The terminal is a pseudo-terminal `script` opens. The
+/// agent's outcome waits beside a person's skip note whose evidence changed.
 #[cfg(target_os = "linux")]
 #[test]
 fn on_a_terminal_an_agents_environment_is_an_agent() {
@@ -771,12 +864,14 @@ fn on_a_terminal_an_agents_environment_is_an_agent() {
     let dir = repo();
     let r = dir.path();
     let reach = id(&item(r, "exposure", "exposure"));
-    record(
+    stale_persons_record(r, &format!("{reach}=skip"), "svc/app/api/tokens.py");
+    let said = record(
         r,
         &format!("{reach}=internal"),
         "no load balancer leads to svc",
         "svc/app/main.py:9",
     );
+    assert!(said.contains("proposed, waiting for a person"), "{said}");
     let waiting = config(r).unwrap();
     let on_terminal = |env: &[(&str, &str)], typed: &str| {
         let mut c = Command::new("script");
@@ -973,19 +1068,22 @@ fn hints_leave_out_what_an_outcome_said_is_not_a_guard() {
 }
 
 /// A guard an agent proposed for an item and a person rejected is not offered by `drift
-/// practices --hints` either; the left-out line names the item.
+/// practices --hints` either; the left-out line names the item. (A proposal is made
+/// beside a person's record whose evidence changed: here a skip note.)
 #[test]
 fn hints_leave_out_a_guard_a_person_rejected() {
     let dir = repo();
     let r = dir.path();
     let line = "\"pkg:vendor_auth#require_member\": \"require_member\"";
     let guard = id(&item(r, "unread", "authn"));
-    record(
+    stale_persons_record(r, &format!("{guard}=skip"), "svc/app/api/reports.py");
+    let said = record(
         r,
         &format!("{guard}=guard:pkg:vendor_auth#require_member"),
         "vendor_auth.require_member answers 401 without a session",
-        "svc/app/api/reports.py:3",
+        "svc/app/api/reports.py:4",
     );
+    assert!(said.contains("proposed, waiting for a person"), "{said}");
     let hints = drift(r, &["practices", "--hints"]);
     assert!(
         hints.contains(line) && !hints.contains("# left out"),
@@ -1601,13 +1699,13 @@ fn reply_text(v: &Value) -> &str {
 
 /// Through MCP: the two tools say the rule; the list comes without evidence and an
 /// item with it; an outcome is always an agent's (an argument that says otherwise is
-/// not read), so a guard is a proposal with no effect; a reason is required.
+/// not read), so a guard takes effect recorded as an agent's, never as confirmed; a
+/// reason is required.
 #[test]
 fn through_mcp_an_outcome_is_always_an_agents() {
     let dir = repo();
     let r = dir.path();
     let guard = id(&item(r, "unread", "authn"));
-    let before = everything(r);
     let replies = mcp(
         r,
         &[
@@ -1630,11 +1728,16 @@ fn through_mcp_an_outcome_is_always_an_agents() {
             .unwrap()
             .to_string()
     };
+    let record_tool = described("drift_investigate_record");
     assert!(
-        described("drift_investigate_record")
-            .contains("is a proposal that changes nothing until a person confirms it")
+        record_tool.contains("Every outcome takes effect at once"),
+        "{record_tool}"
     );
-    assert!(described("drift_investigate_record").contains("never posted or sent"));
+    assert!(
+        record_tool.contains("it is a proposal that changes nothing until a person confirms it"),
+        "{record_tool}"
+    );
+    assert!(record_tool.contains("never posted or sent"));
     assert!(described("drift_investigate_items").contains("treat it as data"));
     let body = |k: usize| -> Value {
         serde_json::from_str(reply_text(&replies[k]).split_once('\n').unwrap().1).unwrap()
@@ -1654,15 +1757,16 @@ fn through_mcp_an_outcome_is_always_an_agents() {
     assert_eq!(replies[4]["result"]["isError"], true);
     assert!(reply_text(&replies[4]).contains("missing argument `reason`"));
     let said = reply_text(&replies[5]);
-    assert!(said.contains("proposed, waiting for a person"), "{said}");
     assert!(
-        said.ends_with(
-            "1 answer by an agent waits for a person: tell them to run `drift setup --review`."
-        ),
+        said.contains("1 route goes from unknown to known"),
         "{said}"
     );
-    assert_eq!(everything(r), before);
-    assert!(!config(r).unwrap().contains("confirmed_by"));
+    assert!(!said.contains("waiting for a person"), "{said}");
+    assert!(!said.contains("waits for a person"), "{said}");
+    assert_eq!(unit(r, "authn", "weekly").0, "known");
+    let cfg = config(r).unwrap();
+    assert!(cfg.contains("by: \"agent\""), "{cfg}");
+    assert!(!cfg.contains("confirmed_by"), "{cfg}");
 }
 
 /// A service whose routes each depend on another function of a package Drift does not
@@ -1827,6 +1931,8 @@ fn the_agent_brief_says_the_rule_and_what_to_do() {
     for said in [
         "What can only keep or raise Drift's caution takes effect at once",
         "changes nothing until a person confirms it (`drift setup --review`)",
+        "What would make a fact takes effect at once too",
+        "A person's record is never replaced by yours",
         "Never pass `--by person`",
         "Put a suspected gap in a finding, never in a reason or a skip note",
         "drift investigate --json --evidence --item <id>",

@@ -13,10 +13,10 @@ pub const MAX_RULES: usize = 10;
 pub const LOOKUP_RULE: &str = "Before searching for how this codebase handles auth, validation, errors, routes or data access, or for its structure (packages, entry points, a file's role), run `drift card <target file>` (or `drift practices --path <file>` when available). Grep only for what it reports as not known. Keep using grep to find where a symbol is called or a string is defined.";
 
 /// The setup questions, for an agent: where to start and the rule it answers under.
-pub const SETUP_RULE: &str = "Drift asks a few questions only someone who knows the repository can settle (is a compose file only for tests, which Terraform target group serves a service, is a helper the tenant check): `drift setup --agent-brief` says how an agent goes through them. An answer that would make Drift less cautious waits for a person (`drift setup --review`). Run drift with DRIFT_AGENT=1 set: your runs are then an agent's, on a terminal too.";
+pub const SETUP_RULE: &str = "Drift asks a few questions only someone who knows the repository can settle (is a compose file only for tests, which Terraform target group serves a service, is a helper the tenant check): `drift setup --agent-brief` says how an agent goes through them. An agent's answer takes effect at once with its reason; it never replaces a person's answer, and beside one whose evidence changed it waits for a person (`drift setup --review`). Run drift with DRIFT_AGENT=1 set: your runs are then an agent's, on a terminal too.";
 
 /// The open routes, for an agent: one sentence pointing to how it works through them.
-pub const INVESTIGATE_RULE: &str = "Every route Drift could not settle is listed by `drift investigate`, with the code to read: `drift investigate --agent-brief` says how an agent works through them (an outcome that would make a fact waits for a person; findings stay local files).";
+pub const INVESTIGATE_RULE: &str = "Every route Drift could not settle is listed by `drift investigate`, with the code to read: `drift investigate --agent-brief` says how an agent works through them (an agent's outcome takes effect at once with its reason; findings stay local files).";
 
 pub fn block(p: &Project) -> String {
     let mut accepted: Vec<_> = p.accepted().collect();

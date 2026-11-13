@@ -163,7 +163,7 @@ setup:
 | `seen` | A digest of the evidence the answer rested on. A question whose evidence changed is asked again. |
 | `by`, `reason`, `evidence`, `on` | For an agent's answer: who gave it, its reason, the `file:line` places it read, and the date. |
 | `confirmed_by: person` | A person confirmed an agent's answer. |
-| `setup.proposed.<id>`, `setup.rejected.<id>` | An agent's answer waiting for a person, and one a person rejected on the evidence it showed. |
+| `setup.proposed.<id>`, `setup.rejected.<id>` | An agent's answer waiting for a person (beside a person's answer whose evidence changed), and one a person rejected on the evidence it showed. |
 
 Use `drift setup --forget <id>` to take an answer out, with what it wrote; do not edit the record by hand. Commit the file so teammates get the same answers.
 

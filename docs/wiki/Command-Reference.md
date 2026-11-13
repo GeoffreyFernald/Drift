@@ -245,7 +245,7 @@ drift setup [OPTIONS]
 | `--forget <ID>` | Take out what the answer to ID wrote, so the question is asked again |  |
 | `--all` | Ask (or list) every question again, the answered ones too |  |
 | `--interactive` | Ask on standard input even when it is not a terminal (a person's run: with `--by person` and DRIFT_SETUP_PERSON=1 when standard input is not a terminal) |  |
-| `--by <person\|agent>` | Who answers: `person` (the default when standard input is a terminal) or `agent` (the default otherwise). An agent's answer takes effect only where it can make Drift more cautious; any other waits for a person (`--review`). Without a terminal, `person` writes only with DRIFT_SETUP_PERSON=1, set by the person who runs the script. A person's word is typed at a terminal: `--confirm`, `--reject`, `--review` (the first id once, then `y` for each) and a person's answer that makes a fact ask for the id on `/dev/tty`, never standard input. Without `--by`, a run is an agent's where `CLAUDECODE` is set or `DRIFT_AGENT=1`, on a terminal too; agents set `DRIFT_AGENT=1`. A script a person runs sets `DRIFT_SETUP_PERSON=1`, and `DRIFT_SETUP_PERSON_NONINTERACTIVE=1` to skip typing ids; both are for scripts a person runs, and an agent never sets them. A terminal is weak evidence of a person and no command-line tool can prove one: every confirmation is recorded (`confirmed_by` in `.drift/config.yaml`), so the review of the committed diff is the final check. |  |
+| `--by <person\|agent>` | Who answers: `person` (the default when standard input is a terminal) or `agent` (the default otherwise). An agent's answer takes effect at once; beside a person's answer whose evidence changed, it waits for a person (`--review`). Without a terminal, `person` writes only with DRIFT_SETUP_PERSON=1, set by the person who runs the script. A person's word is typed at a terminal: `--confirm`, `--reject`, `--review` (the first id once, then `y` for each) and a person's answer that makes a fact ask for the id on `/dev/tty`, never standard input. Without `--by`, a run is an agent's where `CLAUDECODE` is set or `DRIFT_AGENT=1`, on a terminal too; agents set `DRIFT_AGENT=1`. A script a person runs sets `DRIFT_SETUP_PERSON=1`, and `DRIFT_SETUP_PERSON_NONINTERACTIVE=1` to skip typing ids; both are for scripts a person runs, and an agent never sets them. A terminal is weak evidence of a person and no command-line tool can prove one: every confirmation is recorded (`confirmed_by` in `.drift/config.yaml`), so the review of the committed diff is the final check. |  |
 | `--reason <REASON>` | Why the answer is right, naming what was read: required of an agent |  |
 | `--evidence [<FILE:LINE>...]` | With --answer: `file:line` of each place read to decide (repeat for more). With --json: give each question the excerpts a careful reader looks at |  |
 | `--review` | For a person: each answer an agent gave that waits, with its reason; confirm, reject or skip it |  |
@@ -277,7 +277,7 @@ drift setup --forget S-abf5
 - `--review`, `--confirm`, `--reject`: for a person, an agent's waiting answers.
 - `--agent-brief`: Markdown instructions for an agent; changes nothing.
 
-An answer by an agent (`--by agent`, which is the default when standard input is not a terminal) takes effect only where it can make Drift more cautious; any other waits for a person. Agent answers require `--reason`.
+An answer by an agent (`--by agent`, which is the default when standard input is not a terminal) takes effect at once, recorded with its reason; it never replaces a person's answer, and beside one whose evidence changed it waits for a person (`--review`). Agent answers require `--reason`.
 
 **Exit codes**
 
@@ -289,7 +289,7 @@ An answer by an agent (`--by agent`, which is the default when standard input is
 
 ## drift investigate
 
-Lists every route Drift could not settle (authentication or authorization `unknown` or `none`, reach `unknown` or `internal`), grouped by what would settle it, with the evidence to read; and records the outcome an agent or a person reached for each. An outcome that would make a fact waits for a person (`drift setup --review`). For the workflow, see [Investigating open routes](Using-Drift-with-Agents#investigating-open-routes).
+Lists every route Drift could not settle (authentication or authorization `unknown` or `none`, reach `unknown` or `internal`), grouped by what would settle it, with the evidence to read; and records the outcome an agent or a person reached for each. An agent's outcome takes effect at once; beside a person's record whose evidence changed, it waits for a person (`drift setup --review`). For the workflow, see [Investigating open routes](Using-Drift-with-Agents#investigating-open-routes).
 
 ```text
 drift investigate [OPTIONS]
@@ -355,7 +355,7 @@ drift investigate --agent-brief
 - `--record`, `--answers`: one line per item (`I-1a2b3c: ...`), then `N answers by an agent wait for a person` when proposals wait. A finding prints `F-...` and its path; a gap report prints `G-...`, its directory and what Drift says of the example now.
 - `--agent-brief`: Markdown instructions for an agent; changes nothing.
 
-An outcome by an agent (`--by agent`, the default when standard input is not a terminal) requires `--reason` and follows the trust rule of [Setup Questions](Setup-Questions#the-trust-rule): where it could only keep or raise caution it takes effect, otherwise it waits for a person. An agent's outcome is refused where a person's record stands for the item. `--by person` writes only in a terminal, or with `DRIFT_SETUP_PERSON=1` for that run.
+An outcome by an agent (`--by agent`, the default when standard input is not a terminal) requires `--reason` and follows the trust rule of [Setup Questions](Setup-Questions#the-trust-rule): it takes effect at once. An agent's outcome is refused where a person's record stands for the item on the evidence it was recorded on; once that evidence changed, it waits for a person. `--by person` writes only in a terminal, or with `DRIFT_SETUP_PERSON=1` for that run.
 
 **Exit codes**
 

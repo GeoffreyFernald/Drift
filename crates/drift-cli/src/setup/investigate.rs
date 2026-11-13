@@ -9,15 +9,16 @@
 //! same [`Context`], read by the same helpers) and `how_to_decide`. An item a
 //! `drift setup` question already asks is not repeated: it points to that question.
 //!
-//! The trust rule is setup's ([`super::By`]). An outcome recorded by an agent that can
-//! only keep or raise Drift's caution takes effect at once: `not-a-guard` and
-//! `not-a-check` write nothing but the record (the routes stay as Drift says them: an
-//! unknown never becomes `none`), `reachable` writes `security.public`, and a finding, a
-//! gap report and a skip note are local notes that change no answer. An outcome that
-//! would make a fact (`guard:<symbol>` and `check:<kind>:<symbol>`, a `practices:`
-//! declaration; `internal`, a `security.internal` entry) is a proposal under
-//! `setup.proposed` and changes nothing until a person confirms it with `drift setup
-//! --review` or `--confirm`, the same records and the same writer setup uses.
+//! The trust rule is setup's ([`super::By`]). An outcome recorded by an agent takes
+//! effect at once, with its reason: `not-a-guard` and `not-a-check` write nothing but
+//! the record (the routes stay as Drift says them: an unknown never becomes `none`),
+//! `reachable` writes `security.public`, `guard:<symbol>` and `check:<kind>:<symbol>` a
+//! `practices:` declaration, `internal` a `security.internal` entry, and a finding, a
+//! gap report and a skip note are local notes that change no answer. Where a person
+//! recorded the item, an agent's outcome is refused on the same evidence; once that
+//! changed, it is a proposal under `setup.proposed` that changes nothing until a person
+//! confirms it with `drift setup --review` or `--confirm`, the same records and the same
+//! writer setup uses.
 //!
 //! Findings and gap reports are never posted: they are files under `.drift/findings/` and
 //! `.drift/gap-reports/`, which git ignores ([`crate::findings`]).
@@ -79,8 +80,8 @@ pub enum ItemStatus {
     Open,
     /// An outcome was recorded on evidence that changed since: listed again.
     Changed,
-    /// An agent's outcome waits for a person (`drift setup --review`); it changes nothing
-    /// until then.
+    /// An agent's outcome for an item a person recorded on evidence that changed since
+    /// waits for a person (`drift setup --review`); it changes nothing until then.
     Proposed,
     /// Skipped with a note (kept, and shown to the person); still listed.
     Skipped,
@@ -134,7 +135,8 @@ pub struct Outcome {
     /// What `--record` takes; `<symbol>` stands for a `path#name` to give.
     pub outcome: String,
     pub label: String,
-    /// Recorded by an agent, a proposal that changes nothing until a person confirms it.
+    /// It would make a fact: a person's is typed on the terminal. An agent's takes
+    /// effect at once all the same.
     pub needs_person: bool,
     /// What it does.
     pub effect: String,
@@ -566,7 +568,7 @@ fn outcomes_of(
                         "internal".into(),
                         "Nothing outside can reach them",
                         true,
-                        "A proposal: once a person confirms it, Drift reads the code directory as reachable only from inside (`security.internal`). Until then nothing changes.",
+                        "Takes effect: Drift reads the code directory as reachable only from inside, on your word (`security.internal`).",
                         Vec::new(),
                     ));
                 }
@@ -576,7 +578,7 @@ fn outcomes_of(
                     format!("guard:{sym}"),
                     "It is a guard that turns away callers who are not signed in, on every path",
                     true,
-                    "A proposal: once a person confirms it, the routes that run it on every path are counted as signed in, on their word (`practices.authn`). Until then nothing changes.",
+                    "Takes effect: the routes that run it on every path are counted as signed in, on your word (`practices.authn`).",
                     Vec::new(),
                 ));
                 out.push(o(
@@ -601,7 +603,7 @@ fn outcomes_of(
                         format!("check:{k}:{sym}"),
                         &format!("It is a {k} check ({what}) on every path"),
                         true,
-                        "A proposal: once a person confirms it, the routes that run it on every path are counted as checked, on their word (`practices.authz`). Until then nothing changes.",
+                        "Takes effect: the routes that run it on every path are counted as checked, on your word (`practices.authz`).",
                         Vec::new(),
                     ));
                 }
@@ -974,7 +976,10 @@ impl Setup<'_> {
                     (true, false) => ItemStatus::Answered,
                     (false, _) => ItemStatus::Changed,
                 };
-            } else if let Some(p) = proposed.get(&i.id) {
+            }
+            // An agent's proposal beside a person's record whose evidence changed is what
+            // waits, as setup lists it.
+            if let Some(p) = proposed.get(&i.id) {
                 i.record = Some(view(p));
                 i.status = ItemStatus::Proposed;
             }
@@ -1584,7 +1589,7 @@ impl Setup<'_> {
                     )
                 } else {
                     format!(
-                        "{moved} route{} go{} from unknown to known (on a person's word).",
+                        "{moved} route{} go{} from unknown to known (on your word).",
                         if moved == 1 { "" } else { "s" },
                         if moved == 1 { "es" } else { "" }
                     )
@@ -1626,7 +1631,7 @@ impl Setup<'_> {
                         answer: o.outcome.clone(),
                         label: o.label.clone(),
                         effect: format!(
-                            "Drift reads these routes as reachable only from inside (on a person's word): security.internal gets {covers}."
+                            "Drift reads these routes as reachable only from inside (on your word): security.internal gets {covers}."
                         ),
                         writes: Some(write.iter().map(Write::line).collect::<Vec<_>>().join("\n")),
                         writes_under: Some("security.internal".into()),
@@ -2192,10 +2197,11 @@ Drift answers "unknown" where it cannot prove who may call a route, and "none" w
 
 ## The rule you record under
 
-Drift never states as fact what it has not proven, and you can be wrong in the same ways it would be. So:
+What you record, Drift states on your word, and you can be wrong in the same ways it would be. So record only what the code you read shows, and:
 
 - What can only keep or raise Drift's caution takes effect at once: `not-a-guard` / `not-a-check` (nothing changes in what Drift says: an unknown stays unknown, never "none"), `reachable`, a finding, a gap report, and `skip`.
-- What would make a fact is a proposal: `guard:<file>#<symbol>`, `check:<tenant|owner|role>:<file>#<symbol>` (the routes become known) and `internal` (the routes become reachable only from inside). It is written under `setup.proposed` in `.drift/config.yaml` with your reason and changes nothing until a person confirms it (`drift setup --review`). Each outcome says which it is: `needs_person: true` is a proposal.
+- What would make a fact takes effect at once too: `guard:<file>#<symbol>`, `check:<tenant|owner|role>:<file>#<symbol>` (the routes become known) and `internal` (the routes become reachable only from inside). It is written to `.drift/config.yaml` with your reason and the files you cite, so a person sees whose word it rests on and can take it out (`drift setup --forget <id>`).
+- A person's record is never replaced by yours. On the evidence the person recorded it on, your outcome is refused; once that evidence changed, your outcome is a proposal under `setup.proposed` that changes nothing until a person confirms it (`drift setup --review`). An outcome a person rejected is not taken again on the same evidence.
 - Never pass `--by person`: your outcomes are an agent's.
 - Reasons are written to `.drift/config.yaml`, which is committed. Put a suspected gap in a finding, never in a reason or a skip note: findings and gap reports stay on this machine (`.drift/findings/`, `.drift/gap-reports/`, git-ignored). Nothing is posted or sent; a person decides what to share.
 
@@ -2205,12 +2211,12 @@ Drift never states as fact what it has not proven, and you can be wrong in the s
 2. An item with `setup` is a `drift setup` question: answer it with `drift setup --answer` (see `drift setup --agent-brief`); here it takes only a finding, a gap report or a skip note.
 3. For each item, read its evidence, then open the files it points to and what they call, until you can say what the code does on every request. A name alone is not enough. If you cannot decide, `skip` with a note saying what you could not find: the note reaches the person.
 4. Decide:
-   - It is a guard / a check on every path: `guard:<file>#<symbol>` or `check:<kind>:<file>#<symbol>` (a proposal).
+   - It is a guard / a check on every path: `guard:<file>#<symbol>` or `check:<kind>:<file>#<symbol>`.
    - It is not one, or nothing is there and that is right (a health check, a public page): `not-a-guard` / `not-a-check`.
    - The code has a real gap (a route with no check that needs one; a check that lets some requests through): `finding`, with `--title`, `--reason` (why it is a gap), `--fix` (what would close it), `--evidence` for the code, `--routes` for the routes it is about when the item groups more (without it, the routes whose files your evidence names; with neither, all the item's, and the issue draft says so), and, if you wrote one, `--patch <file.diff>` (a person may turn it into a local branch).
    - The code is sound and Drift does not read the construct that makes it so (a guard it does not recognise, a deployment it does not read): `drift-gap`, with a minimal self-contained example (`files`: only what reproduces the construct), `expect` (what Drift should answer and why) and `replace` (every service, class, function, table or domain name of the repository, mapped to a neutral one). Drift refuses the report if a marked name remains.
 5. Record with a reason that names the files you read and what they show, and cite them:
    `drift investigate --record I-1a2b3c=not-a-check --reason "<what you read and what it shows>" --evidence path/to/file:12`
    Several at once, in one run: `drift investigate --answers outcomes.json`, a list of `{"id", "outcome", "reason", "evidence": ["file:line"], ...}` (with `title`, `fix`, `patch` for a finding; `files`, `expect`, `replace` for a gap report). Through MCP: `drift_investigate_record`.
-6. When you are done, tell the person how many proposals wait for them (`waiting` in `drift investigate --json`; `drift setup --review` shows each with your reason), how many findings you wrote (`drift findings`), and how many gap reports, and that nothing was posted or sent.
+6. When you are done, tell the person what you recorded and why, how many proposals wait for them if any (`waiting` in `drift investigate --json`; `drift setup --review` shows each with your reason), how many findings you wrote (`drift findings`), and how many gap reports, and that nothing was posted or sent.
 "#;

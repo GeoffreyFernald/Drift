@@ -83,7 +83,7 @@ Delete `.drift/` and `drift.lock`, remove the Drift entries from `.pre-commit-co
 Accepted conventions of the default tier, suggestions only if their rule family is admitted (none is today) or a person chose to show them, plus facts: a file's card, the practice recipe for a new entry-point file, and notes after an edit. Nothing a person has not accepted is shown as a rule. See [Using Drift with Agents](Using-Drift-with-Agents).
 
 **Can an agent change the policy?**
-No. The hooks deny agent edits to `.drift/` and `drift.lock` (shell commands that write there too, best effort). An agent may propose setup answers through `drift setup`, but any answer that would make Drift say more waits for a person to confirm. See [Setup Questions](Setup-Questions).
+No. The hooks deny agent edits to `.drift/` and `drift.lock` (shell commands that write there too, best effort). An agent may answer setup questions through `drift setup`: its answer takes effect with its reason recorded in `.drift/config.yaml`, so the review of that file's diff shows whose word each answer rests on. An agent never replaces a person's answer; beside one whose evidence changed, its answer waits for a person to confirm. See [Setup Questions](Setup-Questions).
 
 **Does it work with agents other than Claude Code?**
 Through MCP, yes: `drift mcp` serves its tools over standard input and output for any MCP client. The hooks and the plugin are for Claude Code. `drift export agents-md` writes a generated block for `AGENTS.md` or `CLAUDE.md`, readable by any agent. See [MCP Reference](MCP-Reference).

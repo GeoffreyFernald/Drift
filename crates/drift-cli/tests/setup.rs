@@ -609,8 +609,9 @@ fn hints_leave_out_a_check_answered_no() {
 
 /// `drift practices --hints` does not offer the line of a check an agent proposed and a
 /// person rejected (in review or with `--reject`): merging it would undo the person's
-/// word. The left-out line names the question, and forgetting the rejection brings the
-/// line back. A proposal still waiting leaves the line as it is.
+/// word. A proposal is made beside a person's answer whose evidence changed (here their
+/// "no", which the left-out line names); forgetting the person's answer brings the line
+/// back.
 #[test]
 fn hints_leave_out_a_check_a_person_rejected() {
     let dir = check_repo();
@@ -619,18 +620,26 @@ fn hints_leave_out_a_check_a_person_rejected() {
     let id = questions(r, false)[0]["id"].as_str().unwrap().to_string();
     let reason = "services.py:9 compares rule.tenant_id with the caller's tenant_id";
     let left_out = format!(
-        "# left out: \"svc/app/services.py#RuleBook._ensure_access\" under authz: rejected by a person in {id}, proposed as a check (`drift setup --forget {id}` asks again)"
+        "# left out: \"svc/app/services.py#RuleBook._ensure_access\" under authz: answered not a check by {id}"
     );
-    for reject in [
-        vec!["setup", "--by", "person", "--review"],
-        vec!["setup", "--by", "person", "--reject", id.as_str()],
+    for (reject, from, to) in [
+        (
+            vec!["setup", "--by", "person", "--review"],
+            "another tenant",
+            "not your tenant",
+        ),
+        (
+            vec!["setup", "--by", "person", "--reject", id.as_str()],
+            "not your tenant",
+            "another tenant",
+        ),
     ] {
-        drift(r, &agent(&format!("{id}=tenant"), reason));
+        drift(r, &person(&format!("{id}=no")));
+        changed(r, "svc/app/services.py", from, to);
+        let said = drift(r, &agent(&format!("{id}=tenant"), reason));
+        assert!(said.contains("proposed, waiting for a person"), "{said}");
         let hints = drift(r, &["practices", "--hints"]);
-        assert!(
-            hints.contains(line) && !hints.contains("# left out"),
-            "{hints}"
-        );
+        assert!(!hints.contains(line), "{hints}");
         drift_in(r, &reject, "r\n");
         assert!(config(r).unwrap().contains("  rejected:\n"));
         let hints = drift(r, &["practices", "--hints"]);
@@ -959,6 +968,24 @@ fn agent<'a>(id_answer: &'a str, reason: &'a str) -> Vec<&'a str> {
     ]
 }
 
+/// `from` replaced by `to` in `file`: the code changes, so the evidence an answer
+/// about it was given on changed.
+fn changed(root: &Path, file: &str, from: &str, to: &str) {
+    let p = root.join(file);
+    let body = std::fs::read_to_string(&p).unwrap();
+    assert!(body.contains(from), "{file}: {from}");
+    std::fs::write(&p, body.replace(from, to)).unwrap();
+}
+
+/// The listener rule of `infra/api/main.tf` forwards `/admin/*` too.
+const ONE_RULE: &str = "values = [\"/v1/*\"]";
+const TWO_RULES: &str = "values = [\"/v1/*\", \"/admin/*\"]";
+
+/// A person's answer (as a person's script gives it).
+fn person(id_answer: &str) -> Vec<&str> {
+    vec!["setup", "--by", "person", "--answer", id_answer]
+}
+
 /// Everything a proposal must leave as it was: the security inventory, the practice
 /// map, a card, the census and the session hook.
 fn everything(root: &Path, file: &str) -> Vec<String> {
@@ -1021,35 +1048,72 @@ fn an_agents_cautious_answer_takes_effect_with_its_reason() {
     assert_eq!(again["answered_by"], "agent");
 }
 
-/// The Terraform tie by an agent is a proposal: nothing Drift says changes (security,
-/// practices, the card, the census, the session hook) until a person confirms it; then
-/// it is exactly a person's answer, and the comment says who proposed it and why.
+/// The Terraform tie by an agent takes effect at once, recorded as an agent's with its
+/// reason, exactly as a person's tie would.
 #[test]
-fn an_agents_tie_is_a_proposal_until_a_person_confirms_it() {
+fn an_agents_tie_takes_effect_at_once() {
     let dir = deploy_repo();
     let r = dir.path();
     let id = questions(r, false)[0]["id"].as_str().unwrap().to_string();
-    drift(
-        r,
-        &[
-            "setup",
-            "--by",
-            "person",
-            "--answer",
-            &format!("{id}=tests-only"),
-        ],
-    );
+    drift(r, &person(&format!("{id}=tests-only")));
     let q = questions(r, false).remove(0);
     assert_eq!(q["kind"], "terraform");
     assert_eq!(q["choices"][0]["needs_person"], true);
     let tid = q["id"].as_str().unwrap().to_string();
+    let said = drift(
+        r,
+        &agent(
+            &format!("{tid}=tie-1"),
+            "infra/api/main.tf:1 health check /health and rule /v1/* match svc",
+        ),
+    );
+    assert!(said.starts_with(&format!("{tid}: ")), "{said}");
+    assert!(said.contains("go from unknown to"), "{said}");
+    assert!(!said.contains("waiting for a person"), "{said}");
+    let cfg = config(r).unwrap();
+    assert!(cfg.contains("terraform:"), "{cfg}");
+    assert!(
+        cfg.contains("; answered by an agent because infra/api/main.tf:1 health check /health and rule /v1/* match svc\n"),
+        "{cfg}"
+    );
+    assert!(!cfg.contains("proposed:"), "{cfg}");
+    assert!(!cfg.contains("confirmed_by"), "{cfg}");
+    assert!(questions(r, false).is_empty());
+    let every = questions(r, true);
+    let t = every.iter().find(|q| q["id"] == tid.as_str()).unwrap();
+    assert_eq!(t["status"], "answered");
+    assert_eq!(t["answered_by"], "agent");
+    assert_eq!(json(r, &["setup", "--json"])["waiting"], 0);
+    let p = deploy_repo();
+    let p = p.path();
+    drift(p, &person(&format!("{id}=tests-only")));
+    drift(p, &person(&format!("{tid}=tie-1")));
+    assert_eq!(
+        drift(r, &["security", "--json"]),
+        drift(p, &["security", "--json"])
+    );
+}
+
+/// Beside a person's answer whose evidence changed, the Terraform tie by an agent is a
+/// proposal: nothing Drift says changes (security, practices, the card, the census, the
+/// session hook) until a person confirms it; then it is exactly a person's answer, and
+/// the comment says who proposed it and why.
+#[test]
+fn beside_a_persons_stale_answer_an_agents_tie_waits_for_a_person() {
+    let dir = deploy_repo();
+    let r = dir.path();
+    let id = questions(r, false)[0]["id"].as_str().unwrap().to_string();
+    drift(r, &person(&format!("{id}=tests-only")));
+    let tid = questions(r, false)[0]["id"].as_str().unwrap().to_string();
+    drift(r, &person(&format!("{tid}=not-here")));
+    changed(r, "infra/api/main.tf", ONE_RULE, TWO_RULES);
     let before = everything(r, "svc/app/api/routes.py");
     let cfg_before = config(r).unwrap();
     let said = drift(
         r,
         &agent(
             &format!("{tid}=tie-1"),
-            "infra/api/main.tf:1 health check /health and rule /v1/* match svc",
+            "infra/api/main.tf:2 health check /health and rule /v1/* match svc",
         ),
     );
     assert!(
@@ -1059,7 +1123,7 @@ fn an_agents_tie_is_a_proposal_until_a_person_confirms_it() {
     assert_eq!(everything(r, "svc/app/api/routes.py"), before);
     let cfg = config(r).unwrap();
     // Only the record under setup.proposed was added.
-    assert!(cfg.starts_with(&cfg_before), "{cfg}");
+    assert!(cfg.starts_with(cfg_before.trim_end()), "{cfg}");
     assert!(cfg.contains("\n  proposed:\n    # drift setup "), "{cfg}");
     assert!(!cfg.contains("terraform:"), "{cfg}");
     // Listed first, waiting for a person.
@@ -1090,32 +1154,15 @@ fn an_agents_tie_is_a_proposal_until_a_person_confirms_it() {
     assert!(!cfg.contains("proposed:"), "{cfg}");
     assert!(
         cfg.contains("; proposed by an agent on ")
-            && cfg.contains(" because infra/api/main.tf:1 health check /health and rule /v1/* match svc; confirmed\n"),
+            && cfg.contains(" because infra/api/main.tf:2 health check /health and rule /v1/* match svc; confirmed\n"),
         "{cfg}"
     );
     assert!(cfg.contains("confirmed_by: \"person\""), "{cfg}");
-    let person = deploy_repo();
-    let p = person.path();
-    drift(
-        p,
-        &[
-            "setup",
-            "--by",
-            "person",
-            "--answer",
-            &format!("{id}=tests-only"),
-        ],
-    );
-    drift(
-        p,
-        &[
-            "setup",
-            "--by",
-            "person",
-            "--answer",
-            &format!("{tid}=tie-1"),
-        ],
-    );
+    let p = deploy_repo();
+    let p = p.path();
+    changed(p, "infra/api/main.tf", ONE_RULE, TWO_RULES);
+    drift(p, &person(&format!("{id}=tests-only")));
+    drift(p, &person(&format!("{tid}=tie-1")));
     assert_eq!(
         drift(r, &["security", "--json"]),
         drift(p, &["security", "--json"])
@@ -1123,12 +1170,10 @@ fn an_agents_tie_is_a_proposal_until_a_person_confirms_it() {
     assert!(questions(r, false).is_empty());
 }
 
-/// A tenant check by an agent is a proposal with no effect on the practice map; a
-/// person rejects it: it goes, a record stays, and the question is not asked again on
-/// the same evidence, nor can the agent propose the same again; once the code changes
-/// it is asked again. "No" by an agent takes effect.
+/// A tenant check by an agent takes effect at once; the agent may replace its own
+/// answer, and "no" takes the check out again.
 #[test]
-fn an_agents_check_is_a_proposal_and_a_rejection_is_remembered() {
+fn an_agents_check_takes_effect_at_once() {
     let dir = check_repo();
     let r = dir.path();
     let q = questions(r, false).remove(0);
@@ -1137,9 +1182,44 @@ fn an_agents_check_is_a_proposal_and_a_rejection_is_remembered() {
         let fact = matches!(c["answer"].as_str().unwrap(), "tenant" | "owner" | "role");
         assert_eq!(c["needs_person"], fact, "{c:#}");
     }
-    let before = everything(r, "svc/app/api/rules.py");
+    assert_eq!(authz(r, "read_a").0, "unknown");
     let reason = "services.py:9 compares rule.tenant_id with the caller's tenant_id";
-    drift(r, &agent(&format!("{id}=tenant"), reason));
+    let said = drift(r, &agent(&format!("{id}=tenant"), reason));
+    assert!(!said.contains("waiting for a person"), "{said}");
+    assert_eq!(authz(r, "read_a").0, "known");
+    let cfg = config(r).unwrap();
+    assert!(cfg.contains("by: \"agent\""), "{cfg}");
+    assert!(!cfg.contains("proposed:"), "{cfg}");
+    drift(r, &agent(&format!("{id}=no"), "not sure it is a check"));
+    assert_eq!(authz(r, "read_a").0, "unknown");
+    let every = questions(r, true);
+    assert_eq!(every[0]["status"], "answered");
+    assert_eq!(every[0]["answered"], "no");
+}
+
+/// Beside a person's answer whose evidence changed, a tenant check by an agent is a
+/// proposal with no effect on the practice map; a person rejects it: it goes, a record
+/// stays, and the agent cannot propose the same again on the same evidence; once the
+/// code changes it may, and a person's confirmation in review makes it known.
+#[test]
+fn beside_a_persons_stale_answer_a_rejection_is_remembered() {
+    let dir = check_repo();
+    let r = dir.path();
+    let id = questions(r, false)[0]["id"].as_str().unwrap().to_string();
+    drift(r, &person(&format!("{id}=no")));
+    changed(
+        r,
+        "svc/app/services.py",
+        "another tenant",
+        "not your tenant",
+    );
+    let before = everything(r, "svc/app/api/rules.py");
+    let reason = "services.py:10 compares rule.tenant_id with the caller's tenant_id";
+    let said = drift(r, &agent(&format!("{id}=tenant"), reason));
+    assert!(
+        said.starts_with(&format!("{id}: proposed, waiting for a person")),
+        "{said}"
+    );
     assert_eq!(everything(r, "svc/app/api/rules.py"), before);
     assert_eq!(authz(r, "read_a").0, "unknown");
     // Reviewed in a terminal (scripted): rejected.
@@ -1159,44 +1239,28 @@ fn an_agents_check_is_a_proposal_and_a_rejection_is_remembered() {
         cfg.contains("  rejected:\n    # drift setup-rejected "),
         "{cfg}"
     );
-    assert!(questions(r, false).is_empty());
     let every = questions(r, true);
-    assert_eq!(every[0]["status"], "rejected");
     assert_eq!(every[0]["rejected"]["answer"], "tenant");
     let err = drift_fails(r, &agent(&format!("{id}=tenant"), reason), "");
     assert!(err.contains("a person rejected `tenant`"), "{err}");
-    // "No" is cautious: it takes effect, and the rejection stays beside it.
-    drift(r, &agent(&format!("{id}=no"), "not sure it is a check"));
-    let every = questions(r, true);
-    assert_eq!(every[0]["status"], "answered");
-    assert!(config(r).unwrap().contains("rejected:"));
-    assert_eq!(everything(r, "svc/app/api/rules.py"), before);
-    // The check's code changes: the question is open again.
-    drift(r, &["setup", "--by", "person", "--forget", &id]);
-    drift(r, &agent(&format!("{id}=tenant"), reason));
-    drift(r, &["setup", "--by", "person", "--reject", &id]);
-    write(
-        r,
-        "svc/app/services.py",
-        &SERVICES.replace("another tenant", "another team"),
-    );
-    let qs = questions(r, false);
-    assert_eq!(qs.len(), 1, "{qs:#?}");
-    assert_eq!(qs[0]["status"], "open");
-    assert_eq!(qs[0]["rejected"]["stale"], true);
-    // Proposed again and confirmed in review: known, on the person's word.
-    let id = qs[0]["id"].as_str().unwrap().to_string();
-    drift(r, &agent(&format!("{id}=tenant"), reason));
+    // The check's code changes: proposed again and confirmed in review: known, on the
+    // person's word.
+    changed(r, "svc/app/services.py", "not your tenant", "another team");
+    let said = drift(r, &agent(&format!("{id}=tenant"), reason));
+    assert!(said.contains("proposed, waiting for a person"), "{said}");
     let out = drift_in(r, &["setup", "--by", "person", "--review"], "c\n");
     assert!(out.contains("Confirmed 1, rejected 0, waiting 0."), "{out}");
     assert_eq!(authz(r, "read_a").0, "known");
-    assert!(!config(r).unwrap().contains("rejected:"));
+    let cfg = config(r).unwrap();
+    assert!(!cfg.contains("rejected:"), "{cfg}");
+    assert!(cfg.contains("confirmed_by: \"person\""), "{cfg}");
 }
 
-/// "Nothing outside can reach these services" by an agent is a proposal; "some" takes
-/// effect.
+/// "Nothing outside can reach these services" by an agent takes effect at once: the
+/// routes are reachable only from inside. "Some" replaces it, and the routes are as
+/// before.
 #[test]
-fn an_agents_word_that_nothing_outside_reaches_is_a_proposal() {
+fn an_agents_word_that_nothing_outside_reaches_takes_effect() {
     let dir = deploy_repo();
     let r = dir.path();
     std::fs::remove_dir_all(r.join("e2e")).unwrap();
@@ -1207,25 +1271,29 @@ fn an_agents_word_that_nothing_outside_reaches_is_a_proposal() {
     assert_eq!(q["question"], "Can requests from outside reach svc?");
     let id = q["id"].as_str().unwrap().to_string();
     let before = everything(r, "svc/app/api/routes.py");
-    drift(
+    let said = drift(
         r,
         &agent(&format!("{id}=none"), "the compose file publishes no port"),
     );
-    assert_eq!(everything(r, "svc/app/api/routes.py"), before);
-    assert!(!config(r).unwrap().contains("internal:"));
+    assert!(!said.contains("waiting for a person"), "{said}");
+    assert_eq!(exposures(r), all("internal"));
+    let cfg = config(r).unwrap();
+    assert!(cfg.contains("internal:"), "{cfg}");
+    assert!(!cfg.contains("proposed:"), "{cfg}");
     drift(
         r,
         &agent(&format!("{id}=some"), "infra/billing may front it"),
     );
     assert_eq!(everything(r, "svc/app/api/routes.py"), before);
-    assert!(!config(r).unwrap().contains("proposed:"));
+    assert!(!config(r).unwrap().contains("internal:"));
     assert_eq!(questions(r, true)[0]["status"], "answered");
 }
 
-/// Leaving out a compose file is cautious only while no route becomes reachable only
-/// from inside: where what is left keeps the service inside, it is a proposal.
+/// Leaving out a compose file where what is left keeps the service inside: an agent's
+/// "only for tests" makes the routes reachable only from inside at once, on its word;
+/// no boundary says it waits for a person.
 #[test]
-fn an_agents_test_stack_that_would_make_routes_inside_is_a_proposal() {
+fn an_agents_test_stack_that_makes_routes_inside_takes_effect() {
     let dir = deploy_repo();
     let r = dir.path();
     std::fs::remove_dir_all(r.join("infra")).unwrap();
@@ -1244,13 +1312,21 @@ fn an_agents_test_stack_that_would_make_routes_inside_is_a_proposal() {
             .contains("to reachable only from inside"),
         "{tests_only:#}"
     );
+    // A person's would be typed on the terminal.
     assert_eq!(tests_only["needs_person"], true);
-    let before = everything(r, "svc/app/api/routes.py");
-    drift(r, &agent(&format!("{id}=tests-only"), "named e2e"));
-    assert_eq!(everything(r, "svc/app/api/routes.py"), before);
     assert_eq!(exposures(r), all("public"));
-    drift(r, &["setup", "--by", "person", "--confirm", &id]);
+    let said = drift(r, &agent(&format!("{id}=tests-only"), "named e2e"));
+    assert!(!said.contains("waiting for a person"), "{said}");
     assert_eq!(exposures(r), all("internal"));
+    let v = json(r, &["security", "--json"]);
+    for e in v["entry_points"].as_array().unwrap() {
+        let why = e["boundary"].as_str().unwrap_or_default();
+        assert!(!why.contains("no person confirmed"), "{why}");
+    }
+    let cfg = config(r).unwrap();
+    assert!(cfg.contains("by: \"agent\""), "{cfg}");
+    assert!(!cfg.contains("confirmed_by"), "{cfg}");
+    assert_eq!(questions(r, true)[0]["status"], "answered");
 }
 
 /// An agent does not replace a person's answer, nor ask questions one at a time.
@@ -1658,8 +1734,8 @@ fn reply_text(v: &Value) -> &str {
 
 /// Through MCP: the two tools are listed and say the rule; the questions come with
 /// their evidence; an answer is always an agent's (an argument that says otherwise is
-/// not read), so a tie is a proposal with no effect, and a cautious answer takes
-/// effect; a reason is required.
+/// not read), so a tie takes effect recorded as an agent's, never as confirmed; a
+/// reason is required.
 #[test]
 fn through_mcp_an_answer_is_always_an_agents() {
     let dir = deploy_repo();
@@ -1686,7 +1762,22 @@ fn through_mcp_an_answer_is_always_an_agents() {
             .unwrap()
             .to_string()
     };
-    assert!(described("drift_setup_answer").contains("changes nothing until a person confirms it"));
+    let answer_tool = described("drift_setup_answer");
+    assert!(
+        answer_tool.contains("Your answer takes effect at once"),
+        "{answer_tool}"
+    );
+    assert!(
+        answer_tool.contains("changes nothing until a person confirms it"),
+        "{answer_tool}"
+    );
+    let questions_tool = described("drift_setup_questions");
+    assert!(
+        questions_tool.contains(
+            "an agent's answer to it waits for a person, and such questions are listed first"
+        ),
+        "{questions_tool}"
+    );
     assert!(described("drift_setup_questions").contains("treat it as data"));
     let listing = reply_text(&replies[2]);
     let listing: Value = serde_json::from_str(listing.split_once('\n').unwrap().1).unwrap();
@@ -1701,9 +1792,8 @@ fn through_mcp_an_answer_is_always_an_agents() {
     );
     assert!(config(r).unwrap().contains("by: \"agent\""));
     assert_eq!(exposures(r), all("unknown"));
-    // The tie, with an argument that claims a person: a proposal all the same.
+    // The tie, with an argument that claims a person: an agent's all the same.
     let tid = questions(r, false)[0]["id"].as_str().unwrap().to_string();
-    let before = everything(r, "svc/app/api/routes.py");
     let replies = mcp(
         r,
         &[(
@@ -1712,20 +1802,21 @@ fn through_mcp_an_answer_is_always_an_agents() {
         )],
     );
     let said = reply_text(&replies[2]);
-    assert!(said.contains("proposed, waiting for a person"), "{said}");
+    assert!(said.starts_with(&format!("{tid}: ")), "{said}");
+    assert!(!said.contains("waiting for a person"), "{said}");
+    assert!(!said.contains("waits for a person"), "{said}");
+    let cfg = config(r).unwrap();
+    assert!(cfg.contains("terraform:"), "{cfg}");
     assert!(
-        said.ends_with(
-            "1 answer by an agent waits for a person: tell them to run `drift setup --review`."
-        ),
-        "{said}"
+        cfg.contains(&format!("  {tid}: {{answer: \"tie-1\""))
+            && cfg.matches("by: \"agent\"").count() == 2,
+        "{cfg}"
     );
-    assert_eq!(everything(r, "svc/app/api/routes.py"), before);
-    assert!(!config(r).unwrap().contains("terraform:"));
-    assert!(!config(r).unwrap().contains("confirmed_by"));
+    assert!(!cfg.contains("confirmed_by"), "{cfg}");
 }
 
 /// The brief an agent follows: the rule, read the evidence, skip when unsure, a reason
-/// that names the files, and the proposals to hand to a person. It reads nothing of
+/// that names the files, and what to tell the person. It reads nothing of
 /// the repository; the agents' block of AGENTS.md points to it.
 #[test]
 fn the_agent_brief_says_the_rule_and_what_to_do() {
@@ -1733,7 +1824,8 @@ fn the_agent_brief_says_the_rule_and_what_to_do() {
     let brief = drift(dir.path(), &["setup", "--agent-brief"]);
     assert!(brief.starts_with("# Drift's setup questions, for an agent\n"));
     for said in [
-        "An answer that can only make Drift more cautious takes effect at once",
+        "Your answer takes effect at once",
+        "A person's answer is never replaced by yours",
         "changes nothing until a person confirms it",
         "Never pass `--by person`",
         "drift setup --json --evidence",
@@ -1767,8 +1859,8 @@ fn run(root: &Path, args: &[&str]) -> (i32, String, String) {
 }
 
 /// `--answers FILE` applies each answer in order in one run, under the same rule, and
-/// ends where the same answers one by one end: the test stack takes effect, the tie it
-/// opens is a proposal, and the file says so; a pair that names no question is said on
+/// ends where the same answers one by one end: the test stack takes effect, then the tie
+/// it opens, and the file says so; a pair that names no question is said on
 /// stderr, fails the run, and leaves the others written.
 #[test]
 fn several_answers_in_one_run_end_as_one_by_one() {
@@ -1809,14 +1901,9 @@ fn several_answers_in_one_run_end_as_one_by_one() {
         lines[0].starts_with(&format!("{id}: Drift leaves the file out")),
         "{out}"
     );
-    assert!(
-        lines[1].starts_with(&format!("{tid}: proposed, waiting for a person")),
-        "{out}"
-    );
-    assert_eq!(
-        lines[2],
-        "1 answer by an agent waits for a person: `drift setup --review`."
-    );
+    assert!(lines[1].starts_with(&format!("{tid}: ")), "{out}");
+    assert!(!out.contains("waiting for a person"), "{out}");
+    assert_eq!(lines.len(), 2, "{out}");
     assert_eq!(config(r), config(o));
     // Several pairs on one flag, by a person.
     let dir = check_repo();
@@ -1837,7 +1924,7 @@ fn several_answers_in_one_run_end_as_one_by_one() {
     assert_eq!(authz(c, "read_a").0, "known");
 }
 
-// ---------- an agent's word only ever makes Drift more cautious ----------
+// ---------- an agent's answer stands as the code changes ----------
 
 /// The id of the deployment question about `file`, from the listing of every question.
 fn deployment_id(root: &Path, file: &str) -> String {
@@ -1856,13 +1943,13 @@ fn deployment_id(root: &Path, file: &str) -> String {
         .to_string()
 }
 
-/// An agent's "only for tests" was cautious when it was given (Terraform Drift does
-/// not read kept the routes unknown). The Terraform goes: what is left would now make
-/// the routes reachable only from inside on the agent's word alone. Judged again each
-/// time the config is read: the routes read unknown, the question is asked again, and
-/// the agent's answer to it now is a proposal; a person's confirmation makes it a fact.
+/// An agent's "only for tests" keeps the routes unknown while Terraform Drift does not
+/// read is there. The Terraform goes: what is left makes the routes reachable only from
+/// inside, and the agent's answer counts as it is, as a person's would: the routes read
+/// internal, no boundary says it waits for a person, and the question is not asked
+/// again.
 #[test]
-fn an_agents_cautious_answer_is_judged_again_as_the_code_changes() {
+fn an_agents_answer_stands_as_the_code_changes() {
     let dir = deploy_repo();
     let r = dir.path();
     let id = deployment_id(r, "e2e/docker-compose.e2e.yml");
@@ -1875,46 +1962,34 @@ fn an_agents_cautious_answer_is_judged_again_as_the_code_changes() {
     );
     assert_eq!(exposures(r), all("unknown"));
     std::fs::remove_dir_all(r.join("infra")).unwrap();
-    assert_eq!(exposures(r), all("unknown"));
+    assert_eq!(exposures(r), all("internal"));
     let v = json(r, &["security", "--json"]);
-    let why = v["entry_points"][0]["boundary"].as_str().unwrap();
-    assert!(
-        why.contains("which an agent answered and no person confirmed"),
-        "{why}"
-    );
-    let q = questions(r, false)
+    for e in v["entry_points"].as_array().unwrap() {
+        let why = e["boundary"].as_str().unwrap_or_default();
+        assert!(!why.contains("no person confirmed"), "{why}");
+    }
+    let q = questions(r, true)
         .into_iter()
         .find(|q| q["id"] == id.as_str())
         .unwrap();
-    assert_eq!(q["status"], "changed");
-    let tests_only = q["choices"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|c| c["answer"] == "tests-only")
-        .unwrap();
-    assert_eq!(tests_only["needs_person"], true);
-    let said = drift(
-        r,
-        &agent(
-            &format!("{id}=tests-only"),
-            "the e2e workflow starts it for tests",
-        ),
-    );
+    assert_eq!(q["status"], "answered", "{q:#}");
+    assert_eq!(q["answered_by"], "agent");
     assert!(
-        said.starts_with(&format!("{id}: proposed, waiting for a person")),
-        "{said}"
+        !questions(r, false).iter().any(|q| q["id"] == id.as_str()),
+        "asked again"
     );
-    assert_eq!(exposures(r), all("unknown"));
-    drift(r, &["setup", "--by", "person", "--confirm", &id]);
-    assert_eq!(exposures(r), all("internal"));
-    assert!(config(r).unwrap().contains("confirmed_by: \"person\""));
+    // The same as a person's answer.
+    let p = deploy_repo();
+    let p = p.path();
+    std::fs::remove_dir_all(p.join("infra")).unwrap();
+    drift(p, &person(&format!("{id}=tests-only")));
+    assert_eq!(exposures(p), exposures(r));
 }
 
 /// An agent never takes out nor replaces a person's answer: `--forget` of it is
 /// refused, and once its evidence changed the agent's other answer waits for a person
-/// with the person's still in force. An agent's own answer is taken out by it only
-/// where that makes no route reachable only from inside.
+/// with the person's still in force. An agent's own answer it may take out, whatever
+/// that moves.
 #[test]
 fn an_agent_never_takes_out_or_replaces_a_persons_answer() {
     let dir = deploy_repo();
@@ -1975,9 +2050,8 @@ fn an_agent_never_takes_out_or_replaces_a_persons_answer() {
     // Its own proposal an agent may take out.
     drift(r, &["setup", "--forget", &main]);
     assert!(!config(r).unwrap().contains("proposed:"));
-    // An agent's own answer whose leaving out made routes unknown (the only compose
-    // file, which keeps them inside, left out as drift setup writes it): taking it
-    // out would make them reachable only from inside, which needs a person.
+    // An agent's own answer it may take out, whatever that moves: here the only compose
+    // file, which keeps the routes inside, left out as drift setup writes it.
     let dir = deploy_repo();
     let o = dir.path();
     std::fs::remove_dir_all(o.join("infra")).unwrap();
@@ -1994,14 +2068,9 @@ fn an_agent_never_takes_out_or_replaces_a_persons_answer() {
         ),
     );
     assert_eq!(exposures(o), all("unknown"));
-    let err = drift_fails(o, &["setup", "--forget", &main], "");
-    assert!(
-        err.contains("would make 4 routes reachable only from inside"),
-        "{err}"
-    );
-    assert_eq!(exposures(o), all("unknown"));
-    drift(o, &["setup", "--by", "person", "--forget", &main]);
+    drift(o, &["setup", "--forget", &main]);
     assert_eq!(exposures(o), all("internal"));
+    assert!(!config(o).unwrap_or_default().contains(&main));
 }
 
 /// `--forget` takes out only the lines drift setup wrote. Where a person took its entry

@@ -1897,9 +1897,9 @@ export interface PracticeFinding {
  * questions are listed, an agent's answers waiting for a person first; every one with `--all`.
  *
  * Who answers matters: a person's answer takes effect. An agent's (`--by agent`, the default without a terminal, and
- * always through MCP) takes effect only where it can make Drift more cautious; any other (`needs_person` on the
- * choice) is a proposal, status `proposed`, that changes nothing until a person runs `drift setup --review` or
- * `--confirm <id>` (or `--reject <id>`).
+ * always through MCP) takes effect too, recorded with its reason; it never replaces a person's answer, and beside one
+ * whose evidence changed it is a proposal, status `proposed`, that changes nothing until a person runs
+ * `drift setup --review` or `--confirm <id>` (or `--reject <id>`).
  */
 export interface DriftSetupQuestions {
   schema: "drift-setup-questions";
@@ -1909,11 +1909,11 @@ export interface DriftSetupQuestions {
   questions: DriftSetupQuestion[];
   /** Questions answered on the evidence they show now (not listed without `--all`). */
   answered: number;
-  /** An agent's answers waiting for a person (status `proposed`). */
+  /** An agent's answers waiting for a person (status `proposed`, beside a person's answer whose evidence changed). */
   waiting: number;
 }
 
-/** An agent's answer waiting for a person, or one a person rejected. */
+/** An agent's answer waiting for a person (beside a person's answer whose evidence changed), or one a person rejected. */
 export interface DriftSetupProposal {
   answer: string;
   /** The choice in words. */
@@ -1938,7 +1938,7 @@ export interface DriftSetupQuestion {
   kind: "deployment" | "terraform" | "check";
   /**
    * `changed`: answered, and the evidence it rests on changed since, so it is asked again. `proposed`: an agent's
-   * answer waits for a person (`proposal`). `rejected`: a person rejected an agent's answer on this same evidence (listed
+   * answer waits for a person beside a person's answer whose evidence changed (`proposal`). `rejected`: a person rejected an agent's answer on this same evidence (listed
    * only with `--all`).
    */
   status: "open" | "answered" | "changed" | "proposed" | "rejected";
@@ -2010,11 +2010,11 @@ export interface DriftSetupRouteCall {
  * item carries `context` in the same shape and bounds as `drift setup --json --evidence`. An item a setup question
  * already asks carries `setup` (its id) and no context: it is answered there.
  *
- * Outcomes follow setup's rule: recorded by an agent, one that would make a fact (`guard:<file>#<symbol>`,
- * `check:<tenant|owner|role>:<file>#<symbol>`, `internal` where Drift cannot tell) is a proposal under `setup.proposed`
- * that changes nothing until a person confirms it (`drift setup --review` / `--confirm <id>`); any other takes effect
- * (`not-a-guard`, `not-a-check`: a record only, an unknown stays unknown; `reachable`: `security.public`; a skip note; a
- * finding or gap report, a local file).
+ * Outcomes follow setup's rule: recorded by an agent, every outcome takes effect with its reason (`guard:<file>#<symbol>`,
+ * `check:<tenant|owner|role>:<file>#<symbol>`: a `practices:` line; `internal`: `security.internal`; `not-a-guard`,
+ * `not-a-check`: a record only, an unknown stays unknown; `reachable`: `security.public`; a skip note; a finding or gap
+ * report, a local file). Beside a person's record whose evidence changed, it is a proposal under `setup.proposed` that
+ * changes nothing until a person confirms it (`drift setup --review` / `--confirm <id>`).
  */
 export interface DriftInvestigate {
   schema: "drift-investigate";
@@ -2122,7 +2122,7 @@ export interface DriftInvestigateOutcome {
   /** What `--record <id>=` takes; `<path#symbol>` stands for a symbol to give. */
   outcome: string;
   label: string;
-  /** Recorded by an agent, a proposal that changes nothing until a person confirms it. */
+  /** It would make a fact: a person's is typed on the terminal; an agent's takes effect at once all the same. */
   needs_person: boolean;
   effect: string;
   /** What else it needs: `title`, `reason`, `fix`, `evidence` (a finding); `files`, `expect`, `replace` (a gap report). */
@@ -2203,8 +2203,9 @@ export interface DriftSetupChoice {
   /** Routes it moves (0 where none, or not counted before it is picked). */
   moves: number;
   /**
-   * Given by an agent, this answer is a proposal until a person confirms it: it could make a route reachable only from
-   * inside, or a check counted. Every other answer can only make Drift more cautious and takes effect.
+   * This answer would make a fact: it could make a route reachable only from inside, or a check counted. Given by a
+   * person, it is typed on the terminal; every other answer can only make Drift more cautious. An agent's takes effect
+   * either way.
    */
   needs_person: boolean;
 }

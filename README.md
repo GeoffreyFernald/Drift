@@ -284,11 +284,12 @@ drift investigate --agent-brief      # the instructions an agent follows
 drift investigate --record I-1a2b3c=not-a-check --reason "..." --evidence app/svc.py:40
 ```
 
-An outcome follows the same rule as `drift setup`: one that only keeps or raises
-Drift's caution takes effect (`not-a-guard`, `not-a-check`, `reachable`,
-`skip`), and one that would make a fact (`guard:<file>#<symbol>`,
-`check:<kind>:<file>#<symbol>`, `internal`) is a proposal that waits for a person
-in `drift setup --review`. An unknown never becomes `none`. A real gap in the
+An outcome follows the same rule as `drift setup`: an agent's outcome takes
+effect at once with its reason recorded (`not-a-guard`, `not-a-check`,
+`reachable`, `skip`, `guard:<file>#<symbol>`, `check:<kind>:<file>#<symbol>`,
+`internal`). It never replaces a person's record, and beside one whose evidence
+changed it is a proposal that waits for a person in `drift setup --review`.
+An unknown never becomes `none`. A real gap in the
 code becomes a local finding in `.drift/findings/`, and a construct Drift does
 not read becomes a local gap report in `.drift/gap-reports/`. Both directories
 ignore themselves, and nothing is ever posted or sent. `drift findings` lists
@@ -636,8 +637,8 @@ searching for how the codebase handles auth, validation, errors, routes or data
 access. Agents should treat `unknown` as "Drift could not tell" and `none` as
 "nothing found in what Drift read", and grep for what Drift reports as not
 known. An agent can also go through the `drift setup` questions for you
-(`drift setup --agent-brief`); an answer that would make Drift say more waits as
-a proposal until a person confirms it. `drift investigate --agent-brief` does the
+(`drift setup --agent-brief`); each answer takes effect with the agent's reason
+recorded in `.drift/config.yaml`, and never replaces a person's answer. `drift investigate --agent-brief` does the
 same for every other open route (see "Investigate" above); the MCP tools
 `drift_investigate_items` (reads) and `drift_investigate_record` (writes) are its
 agent interface. More: [Using Drift with agents](docs/wiki/Using-Drift-with-Agents.md),

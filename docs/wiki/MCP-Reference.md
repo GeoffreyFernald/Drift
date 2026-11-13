@@ -131,7 +131,7 @@ How this codebase does what an agent is about to add or change, with a file to c
 
 ### `drift_setup_questions`
 
-The questions only a person can answer that would make Drift's answers sharper: is a compose file used to deploy or only for tests; which Terraform target group sends requests to a service; can anything outside reach some services; is a helper the repository's tenant, owner or role check. Each comes with its choices, `how_to_decide` and the evidence to read (excerpts with file and line, and what Drift read and could not). An agent's answers that wait for a person are listed first. It takes about as long as `drift_security`.
+The questions only a person can answer that would make Drift's answers sharper: is a compose file used to deploy or only for tests; which Terraform target group sends requests to a service; can anything outside reach some services; is a helper the repository's tenant, owner or role check. Each comes with its choices, `how_to_decide` and the evidence to read (excerpts with file and line, and what Drift read and could not). Where a person answered a question and its evidence changed since, an agent's answer to it waits for a person, and such questions are listed first. It takes about as long as `drift_security`.
 
 | Argument | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -155,7 +155,7 @@ Result: a first line saying that names and excerpts come from the repository, th
 
 ### `drift_setup_answer`
 
-Answers one question as an agent, with the agent's reason and the `file:line` it read. The answer takes effect at once only where it can make Drift more cautious (a choice whose `needs_person` is false). Any other (a Terraform tie, "nothing outside reaches these services", "yes, this is a check", a test stack whose leaving out makes routes internal) is recorded as a proposal and changes nothing until a person confirms it with `drift setup --review`. Answer `skip` when unsure. Writes `.drift/config.yaml`.
+Answers one question as an agent, with the agent's reason and the `file:line` it read. The answer takes effect at once, recorded as the agent's with its reason. Where a person answered the question, it is refused on the same evidence; once that evidence changed, it is recorded as a proposal and changes nothing until a person confirms it with `drift setup --review`. Answer `skip` when unsure. Writes `.drift/config.yaml`.
 
 | Argument | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -168,7 +168,7 @@ Nothing here lets an answer be a person's: the server always records it as an ag
 
 ### `drift_investigate_record`
 
-Records what the agent found for one `drift_investigate_items` item, with its reason and the `file:line` it read. An outcome that keeps or raises Drift's caution takes effect at once (`not-a-guard`, `not-a-check`, `reachable`, `skip` with a note, a finding, a gap report). One that would make a fact (`guard:<file>#<symbol>`, `check:<kind>:<file>#<symbol>`, `internal`) is a proposal and changes nothing until a person confirms it with `drift setup --review`. A finding (a real gap in the code) and a gap report (a construct Drift does not read, as a minimal example with the repository's names replaced) are local files under `.drift/findings/` and `.drift/gap-reports/`, git-ignored and never posted or sent. Reasons are written to `.drift/config.yaml`, which is committed: a suspected gap belongs in a finding, not in a reason. Skip when unsure.
+Records what the agent found for one `drift_investigate_items` item, with its reason and the `file:line` it read. Every outcome takes effect at once (`not-a-guard`, `not-a-check`, `reachable`, `guard:<file>#<symbol>`, `check:<kind>:<file>#<symbol>`, `internal`, `skip` with a note, a finding, a gap report), recorded as the agent's with its reason. Where a person recorded the item, it is refused on the same evidence; once that evidence changed, it is a proposal that changes nothing until a person confirms it with `drift setup --review`. A finding (a real gap in the code) and a gap report (a construct Drift does not read, as a minimal example with the repository's names replaced) are local files under `.drift/findings/` and `.drift/gap-reports/`, git-ignored and never posted or sent. Reasons are written to `.drift/config.yaml`, which is committed: a suspected gap belongs in a finding, not in a reason. Skip when unsure.
 
 | Argument | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -184,7 +184,7 @@ Records what the agent found for one `drift_investigate_items` item, with its re
 | `expect` | string | a gap report | What Drift should answer on the example, and why. |
 | `replace` | object | a gap report | Each repository name to a neutral name. |
 
-The result is the line `drift investigate --record` prints for it. The server always records the outcome as an agent's. Where a person's record stands for the item (a person's answer, a confirmed proposal, a finding or gap report a person wrote), an agent's outcome is refused. See [Setup Questions](Setup-Questions#the-trust-rule) for the trust rule and [Files Drift Writes](Files-Drift-Writes) for the files.
+The result is the line `drift investigate --record` prints for it. The server always records the outcome as an agent's. Where a person's record stands for the item (a person's answer, a confirmed proposal, a finding or gap report a person wrote), an agent's outcome is refused on the evidence it was recorded on; once that evidence changed, it is a proposal. See [Setup Questions](Setup-Questions#the-trust-rule) for the trust rule and [Files Drift Writes](Files-Drift-Writes) for the files.
 
 ### `drift_verify_card` (experimental)
 

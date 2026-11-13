@@ -73,7 +73,7 @@ The product terms Drift uses in its output, its files and this wiki, each define
 | **Practice map** | `drift practices`: the practices of the whole codebase, concern by concern. Read-only; nothing in it is enforced. |
 | **Preview concern** | A concern (`logging`, `config`, `data_access`, `testing`) shown in a recipe only where at least 60% of the package does the same. |
 | **Promote (withheld card)** | A person's answer to a withheld card that writes it to `.drift/conventions.yaml` as accepted (`promoted_from_hidden: true`). A practice cannot yet be promoted to a convention. |
-| **Proposal** | A mined convention not yet decided (`status: proposed`); it only ever advises. Also, in `drift setup` and `drift investigate`, an agent's answer that would make Drift say more (a guard, a check, "internal"): it is recorded under `setup.proposed` in `.drift/config.yaml` and changes nothing until a person confirms it in `drift setup --review`. |
+| **Proposal** | A mined convention not yet decided (`status: proposed`); it only ever advises. Also, in `drift setup` and `drift investigate`, an agent's answer to a question a person answered on evidence that changed since: it is recorded under `setup.proposed` in `.drift/config.yaml` and changes nothing until a person confirms it in `drift setup --review`. |
 | **Proven** | Read where it is and shown to run on every request. The standard for `known`. |
 | **Recipe** | What new code of one kind of entry point does in a package, concern by concern, each with a file to copy. Given to agents before a new entry-point file is written. |
 | **Rejected** | A convention's status after a person rejected it: never proposed again. |

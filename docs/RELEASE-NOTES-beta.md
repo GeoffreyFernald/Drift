@@ -27,6 +27,20 @@ How accurate it is, in and out of sample: [ACCURACY.md](ACCURACY.md).
 
 ## What is new
 
+### An agent's answer takes effect at once
+
+- In `drift setup` and `drift investigate`, an agent's answer or outcome now
+  takes effect at once, with its reason and evidence recorded in
+  `.drift/config.yaml` (`by: "agent"`). This includes a Terraform tie,
+  "nothing outside reaches these services", a tenant, owner or role check, a
+  guard, and `internal`. An agent may also take out its own answer.
+- A person's word still comes first. An agent never replaces or takes out a
+  person's answer. Beside one whose evidence changed, the agent's answer is a
+  proposal that waits for `drift setup --review`. A rejection is remembered
+  until the evidence changes.
+- Drift no longer judges an agent's "only for tests" again on every read: the
+  routes read as the answer makes them, as for a person's answer.
+
 ### Block candidates: agents see only what a person accepted (D13)
 
 - A default-tier proposal (a TypeScript/JavaScript call wrapper or layering

@@ -152,7 +152,7 @@ The cards and maps an agent reads end with what Drift does not know. An agent sh
 2. **Treat `unknown` as a prompt to read.** The reason names what to look at (`drift card <file>` prints it). Read that code; do not assume either way.
 3. **Treat `none` and `internal` as "nothing found in what Drift read".** They are findings to check, not facts. On code Drift was not tuned on a share of `none` answers are wrong. Never conclude "this route is unauthenticated" or "this service is not reachable from outside" from Drift alone.
 4. **Never edit `.drift/` or `drift.lock`.** Policy is changed by people.
-5. **Use `drift setup` and `drift investigate` under the trust rule:** answer only what the evidence supports, and expect any answer that would make Drift say more to wait for a person.
+5. **Use `drift setup` and `drift investigate` under the trust rule:** answer only what the evidence supports: an agent's answer takes effect at once with its reason recorded, never replaces a person's, and beside a person's answer whose evidence changed it waits for a person.
 6. **Use grep for what it reports as not known**, and for symbol and string lookups.
 
 ## Investigating open routes
@@ -169,7 +169,7 @@ prints the instructions an agent follows (Markdown). The steps:
 2. Read the files the evidence points to, and what they call, until it can say what the code does on every request. A name alone is not enough. If it cannot tell, it records `skip` with a note saying what it could not find.
 3. Record an outcome, with a reason that names the files read, and cite them: `drift investigate --record I-1a2b3c=not-a-check --reason "..." --evidence app/svc.py:40` (MCP: `drift_investigate_record`). Several at once: `--answers outcomes.json`.
 
-The outcomes follow the trust rule of [Setup Questions](Setup-Questions#the-trust-rule): an outcome that only keeps or raises Drift's caution takes effect at once, and one that would make a fact waits for a person.
+The outcomes follow the trust rule of [Setup Questions](Setup-Questions#the-trust-rule): an agent's outcome takes effect at once with its reason recorded, and beside a person's record whose evidence changed it waits for a person.
 
 | Outcome | Takes effect | What it does |
 | --- | --- | --- |

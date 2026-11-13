@@ -100,7 +100,7 @@ Only default-tier conventions in roles of 15 or more members can be set to block
 Treat `.drift/conventions.yaml`, `drift.lock` and `.drift/config.yaml` as policy, not generated output:
 
 - **Name an owner** (a person or a small group), and require their review of changes to these files, for example with a `CODEOWNERS` entry. Drift does not enforce this; your repository host does.
-- **Agents cannot edit these files.** The hooks deny edits to `.drift/` and `drift.lock`, including shell commands that write there, best effort. `drift setup` lets an agent propose, never decide, any answer that would make Drift say more.
+- **Agents cannot edit these files.** The hooks deny edits to `.drift/` and `drift.lock`, including shell commands that write there, best effort. `drift setup` and `drift investigate` are the way an agent writes there: its answers take effect with its reason recorded, so review `.drift/config.yaml` in pull requests, and they never replace a person's answer.
 - **Review `drift.lock` changes.** Lines are added by people (at `init`) and removed by fixing code. A pull request that adds lock lines is baselining new violations and deserves the same scrutiny as a new `drift-ignore`.
 - **Count suppressions.** `drift check` counts `drift-ignore` comments, and the pull-request summary lists the ones a change adds.
 
